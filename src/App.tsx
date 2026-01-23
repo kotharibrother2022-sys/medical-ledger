@@ -702,21 +702,18 @@ const App: React.FC = () => {
 
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
-    data.forEach(entry => {
-      if (!entry.date) return;
-      try {
-        // Parse dd/MM/yyyy or dd-MM-yyyy
-        const date = parse(entry.date.replace(/-/g, '/'), 'dd/MM/yyyy', new Date());
-        if (!isNaN(date.getTime())) {
-          months.add(format(date, 'MMMM yyyy'));
-        }
-      } catch (e) { }
-    });
+    const len = data.length;
+    for (let i = 0; i < len; i++) {
+      const my = data[i].monthYear;
+      if (my) months.add(my);
+    }
     // Sort reverse chronological
     return Array.from(months).sort((a, b) => {
-      const db = parse(b, 'MMMM yyyy', new Date());
-      const da = parse(a, 'MMMM yyyy', new Date());
-      return db.getTime() - da.getTime();
+      try {
+        const db = parse(b, 'MMMM yyyy', new Date());
+        const da = parse(a, 'MMMM yyyy', new Date());
+        return db.getTime() - da.getTime();
+      } catch (e) { return 0; }
     });
   }, [data]);
 
@@ -769,7 +766,7 @@ const App: React.FC = () => {
 
       setError(null);
       let ledgerData: LedgerEntry[] = [];
-      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const startTime = performance.now();
 
       if (year === 'ALL_TIME') {
         const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
@@ -781,12 +778,24 @@ const App: React.FC = () => {
         ledgerData = await fetchLedgerData(year);
       }
 
+      const processTime = performance.now() - startTime;
+      console.log(`Data fetch & process took ${processTime.toFixed(2)}ms for ${ledgerData.length} rows`);
+
       setData(ledgerData);
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastUpdated(now);
-      localStorage.setItem(`cachedLedgerData_${year}`, JSON.stringify(ledgerData));
-      localStorage.setItem(`cachedTime_${year}`, now);
-      localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
-      localStorage.setItem('app_cache_version', CACHE_VERSION);
+
+      const cacheStartTime = performance.now();
+      try {
+        localStorage.setItem(`cachedLedgerData_${year}`, JSON.stringify(ledgerData));
+        localStorage.setItem(`cachedTime_${year}`, now);
+        localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
+        localStorage.setItem('app_cache_version', CACHE_VERSION);
+        console.log(`Caching took ${(performance.now() - cacheStartTime).toFixed(2)}ms`);
+      } catch (e) {
+        console.warn("Failed to cache data (likely too large for localStorage)", e);
+      }
+
       setError(null);
     } catch (error) {
       console.error('Failed to fetch data:', error);
