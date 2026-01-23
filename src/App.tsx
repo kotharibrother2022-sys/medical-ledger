@@ -771,11 +771,11 @@ const App: React.FC = () => {
       if (year === 'ALL_TIME') {
         const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
         setLoadingProgress('Syncing all years...');
-        const results = await Promise.all(years.map(y => fetchLedgerData(y)));
+        const results = await Promise.all(years.map(y => fetchLedgerData(y, forceRefresh)));
         ledgerData = results.flat();
       } else {
         setLoadingProgress(`Syncing ${year}...`);
-        ledgerData = await fetchLedgerData(year);
+        ledgerData = await fetchLedgerData(year, forceRefresh);
       }
 
       const processTime = performance.now() - startTime;

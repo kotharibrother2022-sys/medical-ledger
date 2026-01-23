@@ -73,42 +73,44 @@ function processRow(row: any, fieldMap: Record<string, string>, index: number, n
     return entry;
 }
 
-export async function fetchLedgerData(year: FinancialYear = '25-26'): Promise<LedgerEntry[]> {
-    if (year === 'ALL_TIME') return fetchAllYearsData();
+export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache = false): Promise<LedgerEntry[]> {
+    if (year === 'ALL_TIME') return fetchAllYearsData(ignoreCache);
 
     // Strategy: First try fetching from our lightning-fast GitHub JSON store
-    try {
-        const response = await fetch(`${GITHUB_JSON_URL}?t=${Date.now()}`);
-        if (response.ok) {
-            const allStore = await response.json();
-            const yearSheetName = year === '25-26' ? '25-26' : year; // Adjust if sheet names differ from year codes
-            const rawData = allStore[yearSheetName] || allStore[year];
+    if (!ignoreCache) {
+        try {
+            const response = await fetch(`${GITHUB_JSON_URL}?t=${Date.now()}`);
+            if (response.ok) {
+                const allStore = await response.json();
+                const yearSheetName = year === '25-26' ? '25-26' : year; // Adjust if sheet names differ from year codes
+                const rawData = allStore[yearSheetName] || allStore[year];
 
-            if (rawData && Array.isArray(rawData)) {
-                console.log(`⚡ Loaded ${year} from GitHub JSON store`);
-                const now = new Date();
+                if (rawData && Array.isArray(rawData)) {
+                    console.log(`⚡ Loaded ${year} from GitHub JSON store`);
+                    const now = new Date();
 
-                // Mappings for JSON mode (usually same as CSV headers)
-                const mappings = {
-                    date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.'],
-                    party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                    dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
-                };
+                    // Mappings for JSON mode (usually same as CSV headers)
+                    const mappings = {
+                        date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.'],
+                        party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
+                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+                    };
 
-                const firstRow = rawData[0] || {};
-                const fieldMap: Record<string, string> = {};
-                Object.entries(mappings).forEach(([key, possibleKeys]) => {
-                    const found = Object.keys(firstRow).find(f =>
-                        possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
-                    );
-                    if (found) fieldMap[key] = found;
-                });
+                    const firstRow = rawData[0] || {};
+                    const fieldMap: Record<string, string> = {};
+                    Object.entries(mappings).forEach(([key, possibleKeys]) => {
+                        const found = Object.keys(firstRow).find(f =>
+                            possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
+                        );
+                        if (found) fieldMap[key] = found;
+                    });
 
-                return rawData.map((row, i) => processRow(row, fieldMap, i, now));
+                    return rawData.map((row, i) => processRow(row, fieldMap, i, now));
+                }
             }
+        } catch (e) {
+            console.warn("GitHub store not available, falling back to Google Sheets", e);
         }
-    } catch (e) {
-        console.warn("GitHub store not available, falling back to Google Sheets", e);
     }
 
     // FALLBACK: Slow direct Google Sheets CSV fetch
@@ -139,7 +141,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26'): Promise<Le
         });
     });
 }
-function fetchAllYearsData(): Promise<LedgerEntry[]> {
+function fetchAllYearsData(ignoreCache = false): Promise<LedgerEntry[]> {
     const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
-    return Promise.all(years.map(year => fetchLedgerData(year))).then(res => res.flat());
+    return Promise.all(years.map(year => fetchLedgerData(year, ignoreCache))).then(res => res.flat());
 }
