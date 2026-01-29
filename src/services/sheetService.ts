@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { differenceInDays, parse, format } from 'date-fns';
 
 export interface LedgerEntry {
@@ -113,33 +114,87 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
         }
     }
 
-    // FALLBACK: Slow direct Google Sheets CSV fetch
+    // FALLBACK 1: Google Sheets CSV
     const gid = YEAR_GIDS[year as keyof typeof YEAR_GIDS];
     const url = `${SHEET_BASE_URL}&gid=${gid}&_t=${Date.now()}`;
 
-    return new Promise((resolve, reject) => {
-        Papa.parse(url, {
-            download: true, header: true, skipEmptyLines: true, worker: true,
-            complete: (results) => {
-                const fields = results.meta.fields || [];
-                const fieldMap: Record<string, string> = {};
-                const mappings = {
-                    date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
-                    party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                    dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
-                };
+    try {
+        return await new Promise((resolve, reject) => {
+            Papa.parse(url, {
+                download: true, header: true, skipEmptyLines: true, worker: false, // Worker false for better error handling in some cases
+                complete: (results) => {
+                    const data = results.data as any[];
+                    // Check for Google Sheet Errors
+                    if (!data || data.length === 0 || (data.length > 0 && Object.values(data[0]).some(v => String(v).includes('#ERROR')))) {
+                        reject(new Error("Google Sheet returned #ERROR! or empty data"));
+                        return;
+                    }
 
-                Object.entries(mappings).forEach(([key, possibleKeys]) => {
-                    const found = fields.find(f => possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase()));
-                    if (found) fieldMap[key] = found;
-                });
+                    const fields = results.meta.fields || [];
+                    const fieldMap: Record<string, string> = {};
+                    const mappings = {
+                        date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
+                        party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
+                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+                    };
 
-                const now = new Date();
-                resolve(results.data.map((row, i) => processRow(row, fieldMap, i, now)));
-            },
-            error: (error) => reject(error),
+                    Object.entries(mappings).forEach(([key, possibleKeys]) => {
+                        const found = fields.find(f => possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase()));
+                        if (found) fieldMap[key] = found;
+                    });
+
+                    const now = new Date();
+                    resolve(data.map((row, i) => processRow(row, fieldMap, i, now)));
+                },
+                error: (error) => reject(error),
+            });
         });
-    });
+    } catch (gsError) {
+        console.warn(`Google Sheet fetch failed for ${year}, forcing local backup...`, gsError);
+
+        // FALLBACK 2: Local data.xlsx
+        try {
+            const response = await fetch('/data.xlsx');
+            if (!response.ok) throw new Error("Local file not found");
+            const buffer = await response.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: 'array' });
+
+            // Resolve Sheet Name: "25-26" -> "25-26", etc.
+            // If year is not found, try finding closely matching sheet
+            let sheetName = year;
+            if (!workbook.Sheets[sheetName]) {
+                // Try fuzzy match or default
+                if (year === '25-26') sheetName = workbook.SheetNames.find(n => n.includes('25') && n.includes('26')) || workbook.SheetNames[0];
+                else sheetName = workbook.SheetNames[0];
+            }
+
+            const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+            console.log(`📂 Loaded ${year} from Local Backup (${rawData.length} rows)`);
+
+            const now = new Date();
+            // Mappings for Excel (usually match CSV but let's be safe)
+            const mappings = {
+                date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
+                party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
+                dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+            };
+
+            const firstRow = rawData[0] || {};
+            const fieldMap: Record<string, string> = {};
+            Object.entries(mappings).forEach(([key, possibleKeys]) => {
+                const found = Object.keys(firstRow).find(f =>
+                    possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
+                );
+                if (found) fieldMap[key] = found;
+            });
+
+            return rawData.map((row, i) => processRow(row, fieldMap, i, now));
+
+        } catch (localError) {
+            console.error("Critical: All data sources failed", localError);
+            return [];
+        }
+    }
 }
 function fetchAllYearsData(ignoreCache = false): Promise<LedgerEntry[]> {
     const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
