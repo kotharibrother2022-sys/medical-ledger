@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
+import { SpeedInsights } from "@vercel/speed-insights/react"
 import { fetchLedgerData, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
@@ -1160,6 +1161,7 @@ const App: React.FC = () => {
           <span className="text-[10px] font-bold mt-1 uppercase">Narration</span>
         </button>
       </nav>
+      <SpeedInsights />
     </div>
   );
 };
