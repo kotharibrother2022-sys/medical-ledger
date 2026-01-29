@@ -31,7 +31,6 @@ export type FinancialYear = keyof typeof YEAR_GIDS | 'ALL_TIME';
 
 const SHEET_BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQmnzleOlhV7JbCWGpDNtfK25POYM2ENCS4hQkIog1n3olh-TTzjPg9XSq4ox5ovA/pub?output=csv';
 
-const GITHUB_JSON_URL = '/data/ledger.json';
 
 // Helper to process raw row into LedgerEntry
 function processRow(row: any, fieldMap: Record<string, string>, index: number, now: Date): LedgerEntry {
@@ -77,31 +76,19 @@ function processRow(row: any, fieldMap: Record<string, string>, index: number, n
 export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache = false): Promise<LedgerEntry[]> {
     if (year === 'ALL_TIME') return fetchAllYearsData(ignoreCache);
 
-    // Strategy: First try fetching from our lightning-fast GitHub JSON store
+    // Strategy: First try fetching from our lightning-fast split JSON store
     if (!ignoreCache) {
         try {
-            const response = await fetch(`${GITHUB_JSON_URL}?t=${Date.now()}`);
+            // Construct filename: "25-26" -> "ledger-25_26.json"
+            const safeYear = year.replace(/-/g, '_').toLowerCase();
+            const jsonUrl = `/data/ledger-${safeYear}.json`;
+            const response = await fetch(`${jsonUrl}?t=${Date.now()}`);
+
             if (response.ok) {
-                const allStore = await response.json();
-
-                // Flexible key matching: try "25-26", then "2526", then case-insensitive
-                const possibleKeys = [year, year.replace('-', ''), year.replace('/', '')];
-                let rawData = null;
-                for (const key of possibleKeys) {
-                    if (allStore[key]) {
-                        rawData = allStore[key];
-                        break;
-                    }
-                }
-
-                // Final attempt: fuzzy match
-                if (!rawData) {
-                    const fallbackKey = Object.keys(allStore).find(k => k.includes(year.replace('-', '')));
-                    if (fallbackKey) rawData = allStore[fallbackKey];
-                }
+                const rawData = await response.json();
 
                 if (rawData && Array.isArray(rawData)) {
-                    console.log(`⚡ Loaded ${year} from GitHub JSON store`);
+                    console.log(`⚡ Loaded ${year} from split JSON store`);
                     const now = new Date();
 
                     // Mappings for JSON mode (usually same as CSV headers)
@@ -124,7 +111,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                 }
             }
         } catch (e) {
-            console.warn("GitHub store not available, falling back to Google Sheets", e);
+            console.warn(`Split JSON store not available for ${year}, falling back to Google Sheets`, e);
         }
     }
 
