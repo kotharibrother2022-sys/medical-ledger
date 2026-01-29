@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.0.2",
+    "@capacitor/cli": "^8.0.2",
+    "@capacitor/core": "^8.0.2",
     "@tailwindcss/vite": "^4.1.18",
     "@types/papaparse": "^5.5.2",
     "@types/react-window": "^1.8.8",
@@ -40,6 +43,8 @@
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vite-plugin-pwa": "^1.2.0",
+    "workbox-window": "^7.4.0"
   }
 }

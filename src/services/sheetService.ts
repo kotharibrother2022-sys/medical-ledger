@@ -161,10 +161,11 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
 
             // Resolve Sheet Name: "25-26" -> "25-26", etc.
             // If year is not found, try finding closely matching sheet
-            let sheetName = year;
+            let sheetName: string = year;
             if (!workbook.Sheets[sheetName]) {
                 // Try fuzzy match or default
-                if (year === '25-26') sheetName = workbook.SheetNames.find(n => n.includes('25') && n.includes('26')) || workbook.SheetNames[0];
+                const foundSheet = workbook.SheetNames.find(n => n.includes('25') && n.includes('26'));
+                if (year === '25-26') sheetName = foundSheet || workbook.SheetNames[0];
                 else sheetName = workbook.SheetNames[0];
             }
 
