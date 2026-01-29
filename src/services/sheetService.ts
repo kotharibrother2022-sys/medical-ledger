@@ -83,8 +83,22 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
             const response = await fetch(`${GITHUB_JSON_URL}?t=${Date.now()}`);
             if (response.ok) {
                 const allStore = await response.json();
-                const yearSheetName = year === '25-26' ? '25-26' : year; // Adjust if sheet names differ from year codes
-                const rawData = allStore[yearSheetName] || allStore[year];
+
+                // Flexible key matching: try "25-26", then "2526", then case-insensitive
+                const possibleKeys = [year, year.replace('-', ''), year.replace('/', '')];
+                let rawData = null;
+                for (const key of possibleKeys) {
+                    if (allStore[key]) {
+                        rawData = allStore[key];
+                        break;
+                    }
+                }
+
+                // Final attempt: fuzzy match
+                if (!rawData) {
+                    const fallbackKey = Object.keys(allStore).find(k => k.includes(year.replace('-', '')));
+                    if (fallbackKey) rawData = allStore[fallbackKey];
+                }
 
                 if (rawData && Array.isArray(rawData)) {
                     console.log(`⚡ Loaded ${year} from GitHub JSON store`);
