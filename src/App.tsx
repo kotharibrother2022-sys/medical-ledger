@@ -781,13 +781,23 @@ const App: React.FC = () => {
       const processTime = performance.now() - startTime;
       console.log(`Data fetch & process took ${processTime.toFixed(2)}ms for ${ledgerData.length} rows`);
 
-      setData(ledgerData);
+      // PERFORMANCE OPTIMIZATION: Remove all settled entries (RECEIVED, CANCEL, etc.)
+      // This reduces data size and improves app performance
+      const activeData = ledgerData.filter(entry => {
+        const status = (entry.narration || '').toLowerCase();
+        const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
+        return !isSettled; // Keep only active/pending entries
+      });
+
+      console.log(`Filtered out ${ledgerData.length - activeData.length} settled entries. Active entries: ${activeData.length}`);
+
+      setData(activeData);
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastUpdated(now);
 
       const cacheStartTime = performance.now();
       try {
-        localStorage.setItem(`cachedLedgerData_${year}`, JSON.stringify(ledgerData));
+        localStorage.setItem(`cachedLedgerData_${year}`, JSON.stringify(activeData));
         localStorage.setItem(`cachedTime_${year}`, now);
         localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
         localStorage.setItem('app_cache_version', CACHE_VERSION);
