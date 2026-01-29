@@ -830,22 +830,28 @@ const App: React.FC = () => {
     const hasSearch = searchWords.length > 0;
 
     // Pre-calculate date filter bounds
-    // Pre-calculate date filter bounds using explicit day construction to avoid timezone shifts
+    // SAFELY handle date parsing to prevent crashes
     let startBound: number | null = null;
     let endBoundTime: number | null = null;
 
-    if (dateRange.start) {
-      // Create date as "YYYY-MM-DDT00:00:00" to respect local day start
-      const s = new Date(dateRange.start);
-      s.setHours(0, 0, 0, 0);
-      startBound = s.getTime();
-    }
+    try {
+      if (dateRange.start) {
+        const s = new Date(dateRange.start);
+        if (!isNaN(s.getTime())) {
+          s.setHours(0, 0, 0, 0);
+          startBound = s.getTime();
+        }
+      }
 
-    if (dateRange.end) {
-      // Create date as "YYYY-MM-DDT23:59:59.999"
-      const e = new Date(dateRange.end);
-      e.setHours(23, 59, 59, 999);
-      endBoundTime = e.getTime();
+      if (dateRange.end) {
+        const e = new Date(dateRange.end);
+        if (!isNaN(e.getTime())) {
+          e.setHours(23, 59, 59, 999);
+          endBoundTime = e.getTime();
+        }
+      }
+    } catch (e) {
+      console.error("Date filter processing error", e);
     }
 
     const results: LedgerEntry[] = [];
