@@ -930,7 +930,7 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [pendingOnly, setPendingOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration' | 'settings'>('dashboard');
 
   const [lastUpdated, setLastUpdated] = useState<string | null>(() => {
     return localStorage.getItem(`cachedTime_${DEFAULT_YEAR}`);
@@ -1432,15 +1432,48 @@ const App: React.FC = () => {
           />
         ) : activeTab === 'narration' ? (
           <NarrationView data={data} />
-        ) : (
-          <div className="p-4 space-y-3">
-            <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider mb-4 px-2">Main Menu</h2>
-            {['Sync Settings', 'Export Data', 'Help & Support', 'About LedgerPro'].map((item) => (
-              <div key={item} className="glass p-4 rounded-2xl flex items-center justify-between active:scale-95 transition-all">
-                <span className="font-bold text-gray-700">{item}</span>
-                <ChevronRight size={18} className="text-gray-400" />
+        ) : activeTab === 'settings' ? (
+          <div className="p-4 space-y-6 overflow-auto pb-32">
+            <div className="glass p-6 rounded-3xl border-2 border-primary-100">
+              <h2 className="text-lg font-black text-gray-900 mb-2 flex items-center gap-2">
+                <RefreshCcw size={20} className="text-primary-600" />
+                CONNECTION TESTER
+              </h2>
+              <p className="text-xs text-gray-500 font-bold mb-4 uppercase tracking-wider">Verify your Google Sheet Sync</p>
+
+              <div className="space-y-4">
+                <button
+                  onClick={async () => {
+                    const testInv = "TEST-001";
+                    setUpdatingInvoice(testInv);
+                    const ok = await updateLedgerEntry(testInv, "TEST", selectedYear);
+                    if (ok) alert("✅ Connection Ping Sent! Check your sheet for a TEST entry or verify script execution.");
+                    setUpdatingInvoice(undefined);
+                  }}
+                  className="w-full bg-primary-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-primary-200 active:scale-95 transition-all"
+                >
+                  {updatingInvoice === "TEST-001" ? "SENDING..." : "TEST CONNECTION"}
+                </button>
+
+                <p className="text-[10px] text-gray-400 font-medium italic">
+                  Note: If the test "sends" but your sheet doesn't change, ensure your Apps Script URL is correct in the code.
+                </p>
               </div>
-            ))}
+            </div>
+
+            <div className="p-4 space-y-3">
+              <h2 className="text-xs font-black text-gray-400 uppercase tracking-widest px-2">App Menu</h2>
+              {['Export Data', 'Help & Support', 'About LedgerPro'].map((item) => (
+                <div key={item} className="glass p-4 rounded-2xl border border-gray-100 flex items-center justify-between active:scale-95 transition-all">
+                  <span className="font-bold text-gray-700">{item}</span>
+                  <ChevronRight size={18} className="text-gray-400" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 flex items-center justify-center h-full">
+            <button onClick={() => setActiveTab('settings')} className="bg-primary-50 text-primary-600 px-6 py-3 rounded-2xl font-black">OPEN SETTINGS</button>
           </div>
         )}
       </main>
@@ -1474,6 +1507,13 @@ const App: React.FC = () => {
         >
           <Tags size={24} />
           <span className="text-[10px] font-bold mt-1 uppercase">Narration</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`flex flex-col items-center p-2 transition-all ${activeTab === 'settings' ? 'text-primary-600 scale-110' : 'text-gray-400'}`}
+        >
+          <RefreshCcw size={24} />
+          <span className="text-[10px] font-bold mt-1 uppercase">Settings</span>
         </button>
       </nav>
       <SpeedInsights />

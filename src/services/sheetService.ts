@@ -214,21 +214,14 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxo_Your_Script
 
 export async function updateLedgerEntry(invoiceNo: string, newStatus: string, year: string): Promise<boolean> {
     try {
-        await fetch(APPS_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors', // Apps Script requires no-cors sometimes or handles it via redirect
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                invoiceNo: invoiceNo,
-                status: newStatus,
-                year: year
-            })
+        // We use GET because it's 훨씬 easier for users to test in a browser
+        const url = `${APPS_SCRIPT_URL}?invoice=${encodeURIComponent(invoiceNo)}&status=${encodeURIComponent(newStatus)}&year=${encodeURIComponent(year)}`;
+
+        await fetch(url, {
+            method: 'GET',
+            mode: 'no-cors' // Still use no-cors to bypass complex preflight checks
         });
 
-        // Since we use no-cors, we can't see the response body, 
-        // but we can assume success if no error is thrown.
         return true;
     } catch (error) {
         console.error("Update failed:", error);
