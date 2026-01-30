@@ -780,26 +780,9 @@ const App: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<FinancialYear>(DEFAULT_YEAR);
   const [selectedParty, setSelectedParty] = useState<string>('');
 
-  // Lazy initialize data from localStorage to avoid "Loading..." flash
-  const [data, setData] = useState<LedgerEntry[]>(() => {
-    try {
-      const v = localStorage.getItem('app_cache_version');
-      if (v !== CACHE_VERSION) return [];
-
-      const cached = localStorage.getItem(`cachedLedgerData_${DEFAULT_YEAR}`);
-      return cached ? JSON.parse(cached) : [];
-    } catch (e) {
-      console.error("Failed to parse init cache", e);
-      return [];
-    }
-  });
-
-  const [loading, setLoading] = useState(() => {
-    const v = localStorage.getItem('app_cache_version');
-    if (v !== CACHE_VERSION) return true;
-    // Only show loading if we didn't find data in cache
-    return !localStorage.getItem(`cachedLedgerData_${DEFAULT_YEAR}`);
-  });
+  // DEFER LOADING: Initialize empty to allow first paint
+  const [data, setData] = useState<LedgerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -845,6 +828,21 @@ const App: React.FC = () => {
       });
       localStorage.setItem('app_cache_version', CACHE_VERSION);
     }
+
+    // Initial Cache Load - Deferred to after first paint
+    const initLoad = () => {
+      try {
+        const cached = localStorage.getItem(`cachedLedgerData_${selectedYear}`);
+        if (cached) {
+          setData(JSON.parse(cached));
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error("Initial cache load failed", e);
+      }
+    };
+
+    setTimeout(initLoad, 10);
   }, []);
 
   const loadData = async (year: FinancialYear = selectedYear, forceRefresh = false) => {
@@ -858,11 +856,21 @@ const App: React.FC = () => {
       // 3. If NO cache -> Set loading=true, fetch new.
 
       if (cached && !forceRefresh) {
-        setData(JSON.parse(cached));
-        setLastUpdated(cachedTime);
-        setLoading(false);
-        setRefreshing(false);
-        return; // STOP HERE. Do not auto-fetch.
+        // Use a timeout to avoid blocking the main thread if the JSON is huge
+        setTimeout(() => {
+          try {
+            const parsed = JSON.parse(cached);
+            setData(parsed);
+            setLastUpdated(cachedTime);
+            setLoading(false);
+            setRefreshing(false);
+          } catch (e) {
+            console.error("Failed to parse cache", e);
+            // Fallback to network
+            loadData(year, true);
+          }
+        }, 0);
+        return;
       }
 
       // If we are here, we are either:
@@ -903,15 +911,20 @@ const App: React.FC = () => {
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastUpdated(now);
 
-      const cacheStartTime = performance.now();
-      try {
-        localStorage.setItem(`cachedLedgerData_${year}`, JSON.stringify(ledgerData));
-        localStorage.setItem(`cachedTime_${year}`, now);
-        localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
-        localStorage.setItem('app_cache_version', CACHE_VERSION);
-        console.log(`Caching took ${(performance.now() - cacheStartTime).toFixed(2)}ms`);
-      } catch (e) {
-        console.warn("Failed to cache data (likely too large for localStorage)", e);
+      // DEFER CACHING: Move to background thread to prevent UI freezing
+      if (year !== 'ALL_TIME') { // NEVER cache ALL_TIME (too large for localStorage)
+        setTimeout(() => {
+          try {
+            const cacheString = JSON.stringify(ledgerData);
+            localStorage.setItem(`cachedLedgerData_${year}`, cacheString);
+            localStorage.setItem(`cachedTime_${year}`, now);
+            localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
+            localStorage.setItem('app_cache_version', CACHE_VERSION);
+            console.log("Deferred caching complete");
+          } catch (e) {
+            console.warn("Failed to cache data (likely too large for localStorage)", e);
+          }
+        }, 100);
       }
 
       setError(null);
