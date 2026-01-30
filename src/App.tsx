@@ -1479,7 +1479,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Navigation - Bottom bar for mobile */}
-      <nav className="glass border-t border-gray-200 px-6 py-2 pb-6 flex justify-between items-center">
+      <nav className="glass border-t border-gray-200 px-2 py-2 pb-6 flex justify-around items-center">
         <button
           onClick={() => setActiveTab('dashboard')}
           className={`flex flex-col items-center p-2 transition-all ${activeTab === 'dashboard' ? 'text-primary-600 scale-110' : 'text-gray-400'}`}
