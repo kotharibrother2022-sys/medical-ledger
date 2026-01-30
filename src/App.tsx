@@ -140,8 +140,15 @@ const Row = ({ index, style, data }: RowComponentProps<RowData>) => {
 };
 
 // Ledger View Component
-const LedgerView = ({ data }: { data: LedgerEntry[] }) => {
-  const [selectedParty, setSelectedParty] = useState<string>('');
+const LedgerView = ({
+  data,
+  selectedParty,
+  setSelectedParty
+}: {
+  data: LedgerEntry[],
+  selectedParty: string,
+  setSelectedParty: (party: string) => void
+}) => {
   const [showDueOnly, setShowDueOnly] = useState(false);
   const [narrationFilter, setNarrationFilter] = useState('');
 
@@ -414,7 +421,14 @@ const LedgerView = ({ data }: { data: LedgerEntry[] }) => {
   );
 };
 
-const ReportsView = ({ data }: { data: LedgerEntry[] }) => {
+// Reports View Component
+const ReportsView = ({
+  data,
+  onPartyClick
+}: {
+  data: LedgerEntry[],
+  onPartyClick: (party: string) => void
+}) => {
   const pendingData = useMemo(() => data.filter(entry => {
     const status = (entry.narration || '').toLowerCase();
     const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
@@ -502,7 +516,11 @@ const ReportsView = ({ data }: { data: LedgerEntry[] }) => {
         </div>
         <div className="space-y-3">
           {partyGroups.slice(0, 50).map(([party, stats]) => (
-            <div key={party} className="glass p-4 rounded-2xl border border-gray-100 flex justify-between items-center">
+            <div
+              key={party}
+              onClick={() => onPartyClick(party)}
+              className="glass p-4 rounded-2xl border border-gray-100 flex justify-between items-center active:scale-[0.98] cursor-pointer hover:border-primary-200 transition-all"
+            >
               <div className="flex-1 min-w-0 mr-4">
                 <h3 className="font-bold text-gray-800 text-sm truncate">{party}</h3>
                 <p className="text-[10px] font-medium text-gray-400 uppercase">{stats.bills} Pending Bills</p>
@@ -760,6 +778,7 @@ const DEFAULT_YEAR: FinancialYear = '25-26';
 
 const App: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<FinancialYear>(DEFAULT_YEAR);
+  const [selectedParty, setSelectedParty] = useState<string>('');
 
   // Lazy initialize data from localStorage to avoid "Loading..." flash
   const [data, setData] = useState<LedgerEntry[]>(() => {
@@ -1210,9 +1229,19 @@ const App: React.FC = () => {
             )}
           </>
         ) : activeTab === 'reports' ? (
-          <ReportsView data={data} />
+          <ReportsView
+            data={data}
+            onPartyClick={(party) => {
+              setSelectedParty(party);
+              setActiveTab('ledger');
+            }}
+          />
         ) : activeTab === 'ledger' ? (
-          <LedgerView data={data} />
+          <LedgerView
+            data={data}
+            selectedParty={selectedParty}
+            setSelectedParty={setSelectedParty}
+          />
         ) : activeTab === 'narration' ? (
           <NarrationView data={data} />
         ) : (
