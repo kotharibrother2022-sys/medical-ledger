@@ -89,9 +89,21 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
 
                 if (rawData && Array.isArray(rawData)) {
                     console.log(`⚡ Loaded ${year} from split JSON store`);
-                    const now = new Date();
 
-                    // Mappings for JSON mode (usually same as CSV headers)
+                    // If the JSON is already pre-processed (has searchString), return it directly for extreme speed
+                    if (rawData.length > 0 && (rawData[0] as any).searchString) {
+                        const now = new Date();
+                        // Optional: Update dueDays based on current date if needed
+                        return (rawData as LedgerEntry[]).map(entry => {
+                            if (entry.timestamp) {
+                                entry.dueDays = differenceInDays(now, new Date(entry.timestamp));
+                            }
+                            return entry;
+                        });
+                    }
+
+                    // Fallback for non-processed JSON
+                    const now = new Date();
                     const mappings = {
                         date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.'],
                         party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
