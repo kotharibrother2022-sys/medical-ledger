@@ -18,7 +18,7 @@ export interface LedgerEntry {
     searchString: string; // Pre-calculated lowercase string for fast search
 }
 
-export const CACHE_VERSION = 'v6'; // Bump this to clear old incompatible caches
+export const CACHE_VERSION = 'v7'; // Bump this to clear old incompatible caches
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
@@ -210,7 +210,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
         }
     }
 }
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxo_Your_Script_ID/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz_O0Pd1bK4Tc1sm309_dMuvsfEfrd8PAHcfUdXqY29OloHwALtrMLDaW1dkFXi47OZKw/exec';
 
 export async function updateLedgerEntry(invoiceNo: string, newStatus: string, year: string): Promise<boolean> {
     try {
