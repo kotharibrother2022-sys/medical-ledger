@@ -343,7 +343,7 @@ const LedgerView = ({ data }: { data: LedgerEntry[] }) => {
 
               {/* Main Details */}
               <div className="flex-1">
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Invoice: {entry.invoiceNo}</p>
                     <div className="flex items-center gap-2">
@@ -358,6 +358,38 @@ const LedgerView = ({ data }: { data: LedgerEntry[] }) => {
                         </span>
                       )}
                     </div>
+                  </div>
+
+                  {/* Interaction Buttons */}
+                  <div className="flex gap-2">
+                    {entry.mobileNo ? (
+                      <>
+                        <a
+                          href={`tel:${entry.mobileNo}`}
+                          className="w-8 h-8 flex items-center justify-center text-white bg-green-500 rounded-full shadow-sm active:scale-90"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Phone size={14} className="fill-current" />
+                        </a>
+                        <a
+                          href={`https://wa.me/91${entry.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                            `Hello ${entry.party}, your payment of ₹${(entry.amount || 0).toLocaleString('en-IN')} for Bill ${entry.invoiceNo} dated ${entry.date} is pending. Please clear it. - Kothari Brothers`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-8 h-8 flex items-center justify-center text-white bg-[#25D366] rounded-full shadow-sm active:scale-90"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-[#25D366]">W</span>
+                          </div>
+                        </a>
+                      </>
+                    ) : (
+                      <div className="w-8 h-8 flex items-center justify-center text-gray-300 bg-gray-50 rounded-full border border-gray-100 opacity-50">
+                        <Phone size={12} />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -625,7 +657,7 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
           </div>
         ) : (
           narrationLedger.map((entry, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+            <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="text-xs font-black text-primary-600 uppercase tracking-tight">{entry.party}</h3>
@@ -634,6 +666,43 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
                 <div className="text-right">
                   <p className="text-sm font-black text-gray-900">₹{(entry.amount || 0).toLocaleString('en-IN')}</p>
                   <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-black uppercase">DUE</span>
+                </div>
+              </div>
+
+              {/* Interaction Row */}
+              <div className="flex justify-between items-center pt-2 border-t border-gray-50">
+                <div className="flex items-center text-[10px] text-gray-400 font-bold uppercase">
+                  <Clock size={10} className="mr-1" />
+                  {entry.dueDays} Days Overdue
+                </div>
+
+                <div className="flex gap-2">
+                  {entry.mobileNo ? (
+                    <>
+                      <a
+                        href={`tel:${entry.mobileNo}`}
+                        className="w-8 h-8 flex items-center justify-center text-white bg-green-500 rounded-full shadow-sm active:scale-90 transition-all"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Phone size={14} className="fill-current" />
+                      </a>
+                      <a
+                        href={`https://wa.me/91${entry.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                          `Hello ${entry.party}, your payment of ₹${(entry.amount || 0).toLocaleString('en-IN')} for Bill ${entry.invoiceNo} dated ${entry.date} is pending. Please clear it. - Kothari Brothers`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-8 h-8 flex items-center justify-center text-white bg-[#25D366] rounded-full shadow-sm active:scale-90 transition-all"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
+                          <span className="text-[10px] font-bold text-[#25D366]">W</span>
+                        </div>
+                      </a>
+                    </>
+                  ) : (
+                    <span className="text-[10px] font-bold text-gray-300 italic">No Number</span>
+                  )}
                 </div>
               </div>
             </div>
