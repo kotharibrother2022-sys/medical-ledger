@@ -447,11 +447,12 @@ const ReportsView = ({ data }: { data: LedgerEntry[] }) => {
   }, [pendingData]);
 
   const partyGroups = useMemo(() => {
-    const groups: Record<string, { amount: number, bills: number }> = {};
+    const groups: Record<string, { amount: number, bills: number, mobileNo: string }> = {};
     pendingData.forEach(entry => {
-      if (!groups[entry.party]) groups[entry.party] = { amount: 0, bills: 0 };
+      if (!groups[entry.party]) groups[entry.party] = { amount: 0, bills: 0, mobileNo: entry.mobileNo || '' };
       groups[entry.party].amount += entry.amount;
       groups[entry.party].bills += 1;
+      if (!groups[entry.party].mobileNo && entry.mobileNo) groups[entry.party].mobileNo = entry.mobileNo;
     });
     return Object.entries(groups).sort((a, b) => b[1].amount - a[1].amount);
   }, [pendingData]);
@@ -501,13 +502,41 @@ const ReportsView = ({ data }: { data: LedgerEntry[] }) => {
         </div>
         <div className="space-y-3">
           {partyGroups.slice(0, 50).map(([party, stats]) => (
-            <div key={party} className="glass p-4 rounded-2x border border-gray-100 flex justify-between items-center">
+            <div key={party} className="glass p-4 rounded-2xl border border-gray-100 flex justify-between items-center">
               <div className="flex-1 min-w-0 mr-4">
                 <h3 className="font-bold text-gray-800 text-sm truncate">{party}</h3>
                 <p className="text-[10px] font-medium text-gray-400 uppercase">{stats.bills} Pending Bills</p>
               </div>
-              <div className="text-right">
+              <div className="flex flex-col items-end gap-1">
                 <p className="font-black text-primary-700">₹{(stats.amount || 0).toLocaleString('en-IN')}</p>
+
+                {/* Interaction Row in Report */}
+                <div className="flex gap-2">
+                  {stats.mobileNo ? (
+                    <>
+                      <a
+                        href={`tel:${stats.mobileNo}`}
+                        className="w-7 h-7 flex items-center justify-center text-white bg-green-500 rounded-full active:scale-90 transition-all"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Phone size={12} className="fill-current" />
+                      </a>
+                      <a
+                        href={`https://wa.me/91${stats.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                          `Hello ${party}, your total outstanding balance with Kothari Brothers is ₹${(stats.amount || 0).toLocaleString('en-IN')} across ${stats.bills} bills. Please clear it at the earliest.`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-7 h-7 flex items-center justify-center text-white bg-[#25D366] rounded-full active:scale-90 transition-all"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="w-3.5 h-3.5 bg-white rounded-full flex items-center justify-center">
+                          <span className="text-[8px] font-bold text-[#25D366]">W</span>
+                        </div>
+                      </a>
+                    </>
+                  ) : null}
+                </div>
               </div>
             </div>
           ))}
