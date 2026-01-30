@@ -10,7 +10,27 @@ if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Simple normalization and search string generation matching App logic
+// Convert Excel Serial Date to dd/mm/yyyy
+function formatExcelDate(value) {
+    if (!value) return '';
+
+    // If it's already a string with separators, return it
+    if (typeof value === 'string' && (value.includes('/') || value.includes('-') || value.includes('.'))) {
+        return value;
+    }
+
+    // If it's a number (Excel serial date)
+    if (typeof value === 'number') {
+        const date = XLSX.SSF.parse_date_code(value);
+        const d = String(date.d).padStart(2, '0');
+        const m = String(date.m).padStart(2, '0');
+        const y = date.y;
+        return `${d}/${m}/${y}`;
+    }
+
+    return String(value);
+}
+
 function getSearchString(row, fieldMap) {
     const invoiceNo = String(row[fieldMap.invoiceNo] || '');
     const party = String(row[fieldMap.party] || '');
@@ -22,7 +42,7 @@ function getSearchString(row, fieldMap) {
 
 function convertExcelToSplitJson() {
     console.log("Reading Excel file...");
-    const workbook = XLSX.readFile(EXCEL_FILE);
+    const workbook = XLSX.readFile(EXCEL_FILE, { cellDates: false });
 
     const mappings = {
         date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
@@ -32,7 +52,8 @@ function convertExcelToSplitJson() {
 
     workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        const rawData = XLSX.utils.sheet_to_json(worksheet);
+        // Use raw: true to get the numbers for serial dates, then we convert manually
+        const rawData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
         if (rawData.length === 0) return;
 
         const firstRow = rawData[0];
@@ -46,17 +67,27 @@ function convertExcelToSplitJson() {
 
         // Pre-process rows for speed
         const processedData = rawData.map((row, i) => {
-            const dateStr = String(row[fieldMap.date] || '');
+            const rawDate = row[fieldMap.date];
+            const dateStr = formatExcelDate(rawDate);
+
             let timestamp = 0;
             let monthYear = '';
 
             if (dateStr) {
                 const parts = dateStr.includes('-') ? dateStr.split('-') : dateStr.includes('.') ? dateStr.split('.') : dateStr.split('/');
                 if (parts.length === 3) {
-                    // Assume dd/mm/yyyy
-                    const d = parseInt(parts[0]);
-                    const m = parseInt(parts[1]) - 1;
-                    const y = parseInt(parts[2]);
+                    // Check if it's yyyy/mm/dd (less likely) or dd/mm/yyyy
+                    let d, m, y;
+                    if (parts[0].length === 4) {
+                        y = parseInt(parts[0]);
+                        m = parseInt(parts[1]) - 1;
+                        d = parseInt(parts[2]);
+                    } else {
+                        d = parseInt(parts[0]);
+                        m = parseInt(parts[1]) - 1;
+                        y = parseInt(parts[2]);
+                    }
+
                     const dateObj = new Date(y, m, d);
                     if (!isNaN(dateObj.getTime())) {
                         timestamp = dateObj.getTime();
