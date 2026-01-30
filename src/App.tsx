@@ -15,13 +15,12 @@ import {
   BarChart3,
   Users,
   FileText,
+  FileDown,
+  Tags,
   ChevronRight,
-  Filter as FilterIcon,
-  CalendarDays,
   Check,
   BookOpen,
-  FileDown,
-  Tags
+  CalendarDays
 } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import jsPDF from 'jspdf';
@@ -160,7 +159,7 @@ const LedgerView = ({
 
     // 1. Header
     doc.setFontSize(22);
-    doc.setTextColor(37, 99, 235); // primary-600
+    doc.setTextColor(37, 99, 235);
     doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
 
     doc.setFontSize(10);
@@ -168,7 +167,7 @@ const LedgerView = ({
     doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
 
     // 2. Party Details
-    doc.line(20, 35, pageWidth - 20, 35); // Separator
+    doc.line(20, 35, pageWidth - 20, 35);
 
     doc.setFontSize(14);
     doc.setTextColor(0);
@@ -178,7 +177,6 @@ const LedgerView = ({
     doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
     doc.text(`Filter: ${showDueOnly ? 'Pending Bills Only' : 'All Transactions'}`, 20, 57);
 
-    // 3. Table
     const tableData = partyLedger.map(entry => [
       entry.date,
       entry.invoiceNo,
@@ -193,24 +191,84 @@ const LedgerView = ({
       theme: 'striped',
       headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
       styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: {
-        3: { halign: 'right' }
-      }
+      columnStyles: { 3: { halign: 'right' } }
     });
 
-    // 4. Totals summary
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`TOTAL BALANCE DUE: Rs. ${totals.totalDue.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
 
-    // Footer
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.text('This is a computer generated statement.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
     doc.save(`${selectedParty.replace(/\s+/g, '_')}_Ledger.pdf`);
+  };
+
+  const shareToWhatsApp = async () => {
+    if (!selectedParty || partyLedger.length === 0) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFontSize(22);
+    doc.setTextColor(37, 99, 235);
+    doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
+    doc.line(20, 35, pageWidth - 20, 35);
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text(`Party: ${selectedParty.toUpperCase()}`, 20, 45);
+    doc.setFontSize(10);
+    doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
+    doc.text(`Filter: ${showDueOnly ? 'Pending Bills Only' : 'All Transactions'}`, 20, 57);
+
+    const tableData = partyLedger.map(entry => [
+      entry.date,
+      entry.invoiceNo,
+      entry.narration || '-',
+      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+    ]);
+
+    autoTable(doc, {
+      startY: 65,
+      head: [['Date', 'Invoice No', 'Narration', 'Amount']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 3 },
+      columnStyles: { 3: { halign: 'right' } }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`TOTAL BALANCE DUE: Rs. ${totals.totalDue.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text('This is a computer generated statement.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+    const pdfBlob = doc.output('blob');
+    const fileName = `${selectedParty.replace(/\s+/g, '_')}_Ledger.pdf`;
+    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: `Ledger - ${selectedParty}`,
+          text: `Please find attached the ledger for ${selectedParty}. Total Due: Rs. ${totals.totalDue.toLocaleString('en-IN')}`
+        });
+      } catch (err) {
+        console.error('Share failed', err);
+        doc.save(fileName);
+      }
+    } else {
+      doc.save(fileName);
+      alert("Sharing not supported on this browser. File has been downloaded.");
+    }
   };
 
   // Get unique parties for the dropdown
@@ -287,13 +345,24 @@ const LedgerView = ({
             </datalist>
           </div>
           {selectedParty && partyLedger.length > 0 && (
-            <button
-              onClick={exportToPDF}
-              className="bg-primary-600 text-white p-3 rounded-xl shadow-lg shadow-primary-200 active:scale-90 transition-all flex items-center justify-center"
-              title="Download PDF"
-            >
-              <FileDown size={20} />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={shareToWhatsApp}
+                className="bg-[#25D366] text-white p-3 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+                title="Share to WhatsApp"
+              >
+                <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                  <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+                </div>
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="bg-primary-600 text-white p-3 rounded-xl shadow-lg shadow-primary-200 active:scale-90 transition-all flex items-center justify-center"
+                title="Download PDF"
+              >
+                <FileDown size={20} />
+              </button>
+            </div>
           )}
         </div>
 
@@ -647,9 +716,7 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
       theme: 'grid',
       headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
       styles: { fontSize: 8, cellPadding: 2.5 },
-      columnStyles: {
-        3: { halign: 'right' }
-      }
+      columnStyles: { 3: { halign: 'right' } }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY + 10;
@@ -662,6 +729,71 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
     doc.text('Statement generated for record keeping.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
     doc.save(`${selectedNarration.replace(/\s+/g, '_')}_Due_Report.pdf`);
+  };
+
+  const shareToWhatsApp = async () => {
+    if (!selectedNarration || narrationLedger.length === 0) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFontSize(22);
+    doc.setTextColor(37, 99, 235);
+    doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
+    doc.line(20, 35, pageWidth - 20, 35);
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text(`Narration Group: ${selectedNarration.toUpperCase()}`, 20, 45);
+    doc.setFontSize(10);
+    doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
+    doc.text(`Status: Strictly Due Entries Only`, 20, 57);
+
+    const tableData = narrationLedger.map(entry => [
+      entry.date,
+      entry.party,
+      entry.invoiceNo,
+      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+    ]);
+
+    autoTable(doc, {
+      startY: 65,
+      head: [['Date', 'Party Name', 'Invoice No', 'Amount']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 8, cellPadding: 2.5 },
+      columnStyles: { 3: { halign: 'right' } }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`TOTAL PENDING: Rs. ${totals.totalAmount.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Statement generated for record keeping.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+    const pdfBlob = doc.output('blob');
+    const fileName = `${selectedNarration.replace(/\s+/g, '_')}_Due_Report.pdf`;
+    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: `Report - ${selectedNarration}`,
+          text: `Please find attached the due report for group: ${selectedNarration}. Total Pending: Rs. ${totals.totalAmount.toLocaleString('en-IN')}`
+        });
+      } catch (err) {
+        console.error('Share failed', err);
+        doc.save(fileName);
+      }
+    } else {
+      doc.save(fileName);
+      alert("Sharing not supported on this browser. File has been downloaded.");
+    }
   };
 
   return (
@@ -682,12 +814,23 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
             </datalist>
           </div>
           {selectedNarration && narrationLedger.length > 0 && (
-            <button
-              onClick={exportToPDF}
-              className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg shadow-indigo-200 active:scale-90 transition-all flex items-center justify-center"
-            >
-              <FileDown size={20} />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={shareToWhatsApp}
+                className="bg-[#25D366] text-white p-3 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+                title="Share PDF to WhatsApp"
+              >
+                <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                  <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+                </div>
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg shadow-indigo-200 active:scale-90 transition-all flex items-center justify-center"
+              >
+                <FileDown size={20} />
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1117,7 +1260,7 @@ const App: React.FC = () => {
               : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}
           >
-            <FilterIcon size={18} />
+            <Filter size={18} />
           </button>
         </div>
 
