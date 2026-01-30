@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { SpeedInsights } from "@vercel/speed-insights/react"
-import { fetchLedgerData, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
-import { List, type RowComponentProps } from 'react-window';
+import { fetchLedgerData, updateLedgerEntry, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
+import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
   Search,
@@ -26,11 +26,7 @@ import { format, parse } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-interface RowData {
-  data: LedgerEntry[];
-}
-
-const Row = ({ index, style, data }: RowComponentProps<RowData>) => {
+const Row = ({ index, style, data, onUpdateStatus, updatingInvoice }: any) => {
   const entry = data[index];
   if (!entry) return null;
   const status = (entry.narration || '').toLowerCase();
@@ -38,6 +34,7 @@ const Row = ({ index, style, data }: RowComponentProps<RowData>) => {
   const isOverdue = entry.dueDays > 30 && !isSettled;
   const isReceived = status === 'received';
   const isCancelled = status === 'cancel' || status === 'credit note' || status === 'delete';
+  const isUpdating = updatingInvoice === entry.invoiceNo;
 
   const colourLower = (entry.colour || '').toLowerCase();
   const getCardStyle = () => {
@@ -53,7 +50,7 @@ const Row = ({ index, style, data }: RowComponentProps<RowData>) => {
 
   return (
     <div style={style} className="px-4 py-2">
-      <div className={`glass rounded-xl p-4 transition-all hover:scale-[1.01] active:scale-95 ${getCardStyle()}`}>
+      <div className={`glass rounded-xl p-4 transition-all hover:scale-[1.01] active:scale-95 ${getCardStyle()} ${isUpdating ? 'opacity-50 animate-pulse' : ''}`}>
         <div className="flex justify-between items-start mb-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
@@ -71,12 +68,15 @@ const Row = ({ index, style, data }: RowComponentProps<RowData>) => {
             </div>
             <h3 className="font-bold text-gray-800 line-clamp-1">{entry.party}</h3>
           </div>
-          <div className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ml-2 ${isReceived ? 'bg-green-100 text-green-700' :
-            isCancelled ? 'bg-gray-100 text-gray-700' :
-              isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-            }`}>
-            {entry.narration || 'PENDING'}
-          </div>
+          <button
+            disabled={isUpdating}
+            onClick={() => onUpdateStatus(entry.invoiceNo, entry.narration)}
+            className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ml-2 transition-transform active:scale-90 ${isReceived ? 'bg-green-100 text-green-700' :
+              isCancelled ? 'bg-gray-100 text-gray-700' :
+                isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+              }`}>
+            {isUpdating ? 'SAVING...' : (entry.narration || 'PENDING')}
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-sm mt-2">
@@ -938,6 +938,34 @@ const App: React.FC = () => {
 
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [updatingInvoice, setUpdatingInvoice] = useState<string | undefined>(undefined);
+
+  // Quick Status Update Handler
+  const handleUpdateStatus = async (invoiceNo: string, currentStatus: string) => {
+    // Cycle through: PENDING (empty) -> RECEIVED -> PENDING
+    const nextStatus = (currentStatus || '').toUpperCase() === 'RECEIVED' ? '' : 'RECEIVED';
+
+    setUpdatingInvoice(invoiceNo);
+
+    // 1. Optimistic Update (Immediate Feedback)
+    setData(prev => prev.map(entry =>
+      entry.invoiceNo === invoiceNo ? { ...entry, narration: nextStatus } : entry
+    ));
+
+    // 2. Persist to Sheet
+    const success = await updateLedgerEntry(invoiceNo, nextStatus, selectedYear);
+
+    if (!success) {
+      // Revert if failed
+      setData(prev => prev.map(entry =>
+        entry.invoiceNo === invoiceNo ? { ...entry, narration: currentStatus } : entry
+      ));
+      setError(`Failed to update ${invoiceNo}. Please check script setup.`);
+      setTimeout(() => setError(null), 3000);
+    }
+
+    setUpdatingInvoice(undefined);
+  };
 
   // Date Filters
   const [showFilters, setShowFilters] = useState(false);
@@ -1366,7 +1394,11 @@ const App: React.FC = () => {
                   rowHeight={165}
                   className="no-scrollbar"
                   rowComponent={Row}
-                  rowProps={{ data: filteredData }}
+                  rowProps={{
+                    data: filteredData,
+                    onUpdateStatus: handleUpdateStatus,
+                    updatingInvoice
+                  }}
                   style={{ height, width }}
                 />
               )} />

@@ -210,6 +210,32 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
         }
     }
 }
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxo_Your_Script_ID/exec';
+
+export async function updateLedgerEntry(invoiceNo: string, newStatus: string, year: string): Promise<boolean> {
+    try {
+        await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors', // Apps Script requires no-cors sometimes or handles it via redirect
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                invoiceNo: invoiceNo,
+                status: newStatus,
+                year: year
+            })
+        });
+
+        // Since we use no-cors, we can't see the response body, 
+        // but we can assume success if no error is thrown.
+        return true;
+    } catch (error) {
+        console.error("Update failed:", error);
+        return false;
+    }
+}
+
 function fetchAllYearsData(ignoreCache = false): Promise<LedgerEntry[]> {
     const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
     return Promise.all(years.map(year => fetchLedgerData(year, ignoreCache))).then(res => res.flat());
