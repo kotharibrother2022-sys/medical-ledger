@@ -1242,18 +1242,35 @@ const App: React.FC = () => {
                 <option key={year} value={year}>FY {year}</option>
               ))}
             </select>
-            <div className="flex flex-col items-end">
-              <button
-                onClick={() => loadData(selectedYear, true)}
-                className={`p-2 rounded-full hover:bg-gray-100 transition-colors ${refreshing ? 'animate-spin' : ''}`}
-              >
-                <RefreshCcw size={20} className="text-gray-600" />
-              </button>
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    if (window.confirm("This will clear all cache and reload the app to the latest version. Proceed?")) {
+                      if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+                      }
+                      caches.keys().then(names => names.forEach(n => caches.delete(n)));
+                      localStorage.clear();
+                      window.location.reload(true);
+                    }
+                  }}
+                  className="bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-lg shadow-sm active:scale-95"
+                >
+                  HARD RESET
+                </button>
+                <button
+                  onClick={() => loadData(selectedYear, true)}
+                  className={`p-2 rounded-full hover:bg-gray-100 transition-colors ${refreshing ? 'animate-spin' : ''}`}
+                >
+                  <RefreshCcw size={20} className="text-gray-600" />
+                </button>
+              </div>
               {lastUpdated && !refreshing && (
-                <span className="text-[8px] font-bold text-gray-400 -mt-1 uppercase">Synced {lastUpdated}</span>
+                <span className="text-[8px] font-bold text-gray-400 uppercase">Synced {lastUpdated}</span>
               )}
               {refreshing && (
-                <span className="text-[8px] font-bold text-primary-500 -mt-1 uppercase animate-pulse">
+                <span className="text-[8px] font-bold text-primary-500 uppercase animate-pulse">
                   {loadingProgress || 'Syncing...'}
                 </span>
               )}
