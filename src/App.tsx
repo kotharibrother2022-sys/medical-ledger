@@ -1252,7 +1252,7 @@ const App: React.FC = () => {
                       }
                       caches.keys().then(names => names.forEach(n => caches.delete(n)));
                       localStorage.clear();
-                      window.location.reload(true);
+                      window.location.reload();
                     }
                   }}
                   className="bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-lg shadow-sm active:scale-95"
