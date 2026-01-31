@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { SpeedInsights } from "@vercel/speed-insights/react"
-import { fetchLedgerData, updateLedgerEntry, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
+import { fetchLedgerData, updateLedgerEntry, getTestUrl, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
 import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
@@ -20,7 +20,8 @@ import {
   ChevronRight,
   Check,
   BookOpen,
-  CalendarDays
+  CalendarDays,
+  ExternalLink
 } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import jsPDF from 'jspdf';
@@ -939,6 +940,7 @@ const App: React.FC = () => {
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [updatingInvoice, setUpdatingInvoice] = useState<string | undefined>(undefined);
+  const [pingResult, setPingResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'fail', message?: string }>({ status: 'idle' });
 
   // Quick Status Update Handler
   const handleUpdateStatus = async (invoiceNo: string, currentStatus: string) => {
@@ -1444,19 +1446,61 @@ const App: React.FC = () => {
               <div className="space-y-4">
                 <button
                   onClick={async () => {
-                    const testInv = "TEST-001";
+                    setPingResult({ status: 'testing' });
+                    const testInv = "TEST-PING";
                     setUpdatingInvoice(testInv);
-                    const ok = await updateLedgerEntry(testInv, "TEST", selectedYear);
-                    if (ok) alert("✅ Connection Ping Sent! Check your sheet for a TEST entry or verify script execution.");
+                    try {
+                      const ok = await updateLedgerEntry(testInv, "PING-OK", selectedYear);
+                      if (ok) {
+                        setPingResult({
+                          status: 'success',
+                          message: "Sent! Check for 'TEST-PING' in your sheet. If not found, click 'Browser Test' below."
+                        });
+                      } else {
+                        setPingResult({ status: 'fail', message: "Failed to send. Check your URL or permission settings." });
+                      }
+                    } catch (err) {
+                      setPingResult({ status: 'fail', message: "Error: " + (err as Error).message });
+                    }
                     setUpdatingInvoice(undefined);
                   }}
-                  className="w-full bg-primary-600 text-white font-black py-4 rounded-2xl shadow-lg shadow-primary-200 active:scale-95 transition-all"
+                  className={`w-full font-black py-4 rounded-2xl shadow-lg transition-all active:scale-95 ${pingResult.status === 'success' ? 'bg-green-600 text-white shadow-green-200' :
+                    pingResult.status === 'fail' ? 'bg-red-600 text-white shadow-red-200' :
+                      'bg-primary-600 text-white shadow-primary-200'
+                    }`}
                 >
-                  {updatingInvoice === "TEST-001" ? "SENDING..." : "TEST CONNECTION"}
+                  {updatingInvoice === "TEST-PING" ? "SENDING PING..." : "TEST CONNECTION"}
                 </button>
 
+                {pingResult.status !== 'idle' && (
+                  <div className={`p-4 rounded-xl border-l-4 ${pingResult.status === 'success' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'
+                    }`}>
+                    <p className={`text-xs font-bold ${pingResult.status === 'success' ? 'text-green-800' : 'text-red-800'}`}>
+                      {pingResult.message}
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200">
+                  <h3 className="text-amber-800 text-[10px] font-black uppercase mb-2 flex items-center gap-1">
+                    <ExternalLink size={12} />
+                    Direct Browser Test
+                  </h3>
+                  <p className="text-[10px] text-amber-700 font-medium mb-3">
+                    If the big button above fails, click below. If you see "Success" in the new tab, your script is perfect!
+                  </p>
+                  <a
+                    href={getTestUrl(selectedYear)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-[10px] font-black shadow-sm shadow-amber-200 active:scale-95"
+                  >
+                    TEST IN BROWSER TAB
+                  </a>
+                </div>
+
                 <p className="text-[10px] text-gray-400 font-medium italic">
-                  Note: If the test "sends" but your sheet doesn't change, ensure your Apps Script URL is correct in the code.
+                  Note: A "Sent" result only means the app reached the internet. Only seeing "TEST" in your sheet confirms it's working.
                 </p>
               </div>
             </div>
