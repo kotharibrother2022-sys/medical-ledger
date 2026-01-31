@@ -18,7 +18,7 @@ export interface LedgerEntry {
     searchString: string; // Pre-calculated lowercase string for fast search
 }
 
-export const CACHE_VERSION = 'v8'; // Bump this to clear old incompatible caches
+export const CACHE_VERSION = 'v9'; // Force clear for diagnostics
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current

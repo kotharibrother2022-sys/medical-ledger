@@ -1225,7 +1225,10 @@ const App: React.FC = () => {
               <LayoutDashboard size={20} />
             </div>
             <div>
-              <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
+                <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 animate-pulse">DIAGNOSTICS v9</span>
+              </div>
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] mt-0.5 whitespace-nowrap">A PHARMACEUTICAL DEALERS</p>
             </div>
           </div>
