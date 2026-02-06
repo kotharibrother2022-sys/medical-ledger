@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { SpeedInsights } from "@vercel/speed-insights/react"
-import { fetchLedgerData, updateLedgerEntry, getTestUrl, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
+import { get, set } from 'idb-keyval';
+import { fetchLedgerData, fetchAllYearsData, updateLedgerEntry, getTestUrl, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
 import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
@@ -27,8 +28,9 @@ import { format, parse } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const Row = ({ index, style, data, onUpdateStatus, updatingInvoice }: any) => {
-  const entry = data[index];
+const Row = (props: any) => {
+  const { index, style, data: entries, onUpdateStatus, updatingInvoice } = props;
+  const entry = entries?.[index];
   if (!entry) return null;
   const status = (entry.narration || '').toLowerCase();
   const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
@@ -1002,64 +1004,49 @@ const App: React.FC = () => {
       localStorage.setItem('app_cache_version', CACHE_VERSION);
     }
 
-    // Initial Cache Load - Deferred to after first paint
-    const initLoad = () => {
+    // Initial Cache Load - Using IndexedDB for speed and to prevent thread blocking
+    const initLoad = async () => {
       try {
-        const cached = localStorage.getItem(`cachedLedgerData_${selectedYear}`);
-        if (cached) {
-          setData(JSON.parse(cached));
+        const cached = await get(`cachedLedgerData_${selectedYear}`);
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          setData(cached);
           setLoading(false);
+          setLastUpdated(localStorage.getItem(`cachedTime_${selectedYear}`));
+        } else {
+          // If no cache at all, trigger network sync
+          loadData(selectedYear, true);
         }
       } catch (e) {
         console.error("Initial cache load failed", e);
+        loadData(selectedYear, true);
       }
     };
 
-    setTimeout(initLoad, 10);
+    initLoad();
   }, []);
 
   const loadData = async (year: FinancialYear = selectedYear, forceRefresh = false) => {
     try {
-      const cached = localStorage.getItem(`cachedLedgerData_${year}`);
+      // 1. Check Cache first (IndexedDB is async and doesn't block)
+      const cachedData = await get(`cachedLedgerData_${year}`);
       const cachedTime = localStorage.getItem(`cachedTime_${year}`);
 
-      // CACHE STRATEGY:
-      // 1. If we have cache and NOT forced refresh -> Load cache immediately & stop.
-      // 2. If we have cache AND forced refresh -> Show cache, set refreshing=true, fetch new.
-      // 3. If NO cache -> Set loading=true, fetch new.
-
-      if (cached && !forceRefresh) {
-        // Use a timeout to avoid blocking the main thread if the JSON is huge
-        setTimeout(() => {
-          try {
-            const parsed = JSON.parse(cached);
-            setData(parsed);
-            setLastUpdated(cachedTime);
-            setLoading(false);
-            setRefreshing(false);
-          } catch (e) {
-            console.error("Failed to parse cache", e);
-            // Fallback to network
-            loadData(year, true);
-          }
-        }, 0);
+      if (cachedData && !forceRefresh) {
+        setData(cachedData);
+        setLastUpdated(cachedTime);
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
 
-      // If we are here, we are either:
-      // A) Forcing a refresh (user clicked button)
-      // B) Have no cache (first time user)
-
-      if (cached) {
-        // Option A: We have data, so keep showing it, just show spinner
+      // 2. Start Sync UI
+      if (cachedData) {
         setRefreshing(true);
-        // Ensure data is set from cache just in case we came here directly
         if (data.length === 0) {
-          setData(JSON.parse(cached));
+          setData(cachedData);
           setLastUpdated(cachedTime);
         }
       } else {
-        // Option B: No data at all, heavy loading screen
         setLoading(true);
       }
 
@@ -1067,44 +1054,34 @@ const App: React.FC = () => {
       let ledgerData: LedgerEntry[] = [];
       const startTime = performance.now();
 
+      // 3. Network Fetch
       if (year === 'ALL_TIME') {
-        const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
         setLoadingProgress('Syncing all years...');
-        const results = await Promise.all(years.map(y => fetchLedgerData(y, forceRefresh)));
-        ledgerData = results.flat();
+        ledgerData = await fetchAllYearsData(forceRefresh);
       } else {
         setLoadingProgress(`Syncing ${year}...`);
         ledgerData = await fetchLedgerData(year, forceRefresh);
       }
 
-      const processTime = performance.now() - startTime;
-      console.log(`Data fetch & process took ${processTime.toFixed(2)}ms for ${ledgerData.length} rows`);
+      console.log(`Fetch took ${(performance.now() - startTime).toFixed(2)}ms for ${ledgerData.length} rows`);
 
+      // 4. Update State & UI
       setData(ledgerData);
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastUpdated(now);
 
-      // DEFER CACHING: Move to background thread to prevent UI freezing
-      if (year !== 'ALL_TIME') { // NEVER cache ALL_TIME (too large for localStorage)
-        setTimeout(() => {
-          try {
-            const cacheString = JSON.stringify(ledgerData);
-            localStorage.setItem(`cachedLedgerData_${year}`, cacheString);
-            localStorage.setItem(`cachedTime_${year}`, now);
-            localStorage.setItem(`cachedTimestamp_${year}`, Date.now().toString());
-            localStorage.setItem('app_cache_version', CACHE_VERSION);
-            console.log("Deferred caching complete");
-          } catch (e) {
-            console.warn("Failed to cache data (likely too large for localStorage)", e);
-          }
-        }, 100);
+      // 5. CACHE IN BACKGROUND (Use IndexedDB for large JSON)
+      if (year !== 'ALL_TIME') {
+        // No need for setTimeout here as IDB is async and set is usually efficient
+        set(`cachedLedgerData_${year}`, ledgerData).catch(e => console.warn("IDB cache fail", e));
+        localStorage.setItem(`cachedTime_${year}`, now);
+        localStorage.setItem('app_cache_version', CACHE_VERSION);
       }
 
       setError(null);
     } catch (error) {
-      console.error('Failed to fetch data:', error);
-      setError('Failed to sync. Showing last saved data.');
-      // If fetch fails, we might still have cache, which is already set.
+      console.error('Data Sync Error:', error);
+      setError('Sync failed. Using offline data.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -1390,7 +1367,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden relative">
+      <main className="flex-1 overflow-hidden relative flex flex-col">
         {activeTab === 'dashboard' ? (
           <>
             {/* Dashboard Summary Cards */}
@@ -1409,9 +1386,11 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 h-full pb-32">
-              <AutoSizer renderProp={({ height, width }) => (
+            <div className="flex-1 min-h-0 bg-slate-50 relative overflow-hidden">
+              <AutoSizer renderProp={({ height, width }: { height: number, width: number }) => (
                 <List
+                  height={height}
+                  width={width}
                   rowCount={filteredData.length}
                   rowHeight={165}
                   className="no-scrollbar"
@@ -1421,7 +1400,6 @@ const App: React.FC = () => {
                     onUpdateStatus: handleUpdateStatus,
                     updatingInvoice
                   }}
-                  style={{ height, width }}
                 />
               )} />
             </div>

@@ -18,7 +18,7 @@ export interface LedgerEntry {
     searchString: string; // Pre-calculated lowercase string for fast search
 }
 
-export const CACHE_VERSION = 'v9'; // Force clear for diagnostics
+export const CACHE_VERSION = 'v11'; // Complete reset to clean up all experiments
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
@@ -34,41 +34,41 @@ const SHEET_BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQmnzleO
 
 // Helper to process raw row into LedgerEntry
 function processRow(row: any, fieldMap: Record<string, string>, index: number, now: Date): LedgerEntry {
-    const f_date = fieldMap['date'];
-    const dateStr = (f_date ? row[f_date] : '') || '';
-
+    const dateStr = (fieldMap['date'] ? row[fieldMap['date']] : '') || '';
     let dueDays = 0;
     let timestamp = 0;
     let monthYear = '';
 
     if (dateStr) {
         try {
-            const normalizedDate = dateStr.includes('-') ? dateStr.replace(/-/g, '/') : dateStr.replace(/\./g, '/');
+            // Speed optimization: simple character replacement instead of regex where possible
+            const normalizedDate = dateStr.indexOf('-') !== -1 ? dateStr.replace(/-/g, '/') : dateStr.replace(/\./g, '/');
             const parsedDate = parse(normalizedDate, 'dd/MM/yyyy', now);
-            if (!isNaN(parsedDate.getTime())) {
+            if (parsedDate.getTime()) {
                 timestamp = parsedDate.getTime();
                 monthYear = format(parsedDate, 'MMMM yyyy');
                 dueDays = differenceInDays(now, parsedDate);
             }
-        } catch (e) { }
+        } catch (e) { /* ignore parse errors */ }
     }
 
     const entry: LedgerEntry = {
-        sNo: (fieldMap['sNo'] ? row[fieldMap['sNo']] : '') || String(index + 1),
-        invoiceNo: (fieldMap['invoiceNo'] ? row[fieldMap['invoiceNo']] : '') || '',
+        sNo: String(row[fieldMap['sNo']] || index + 1),
+        invoiceNo: String(row[fieldMap['invoiceNo']] || ''),
         date: dateStr,
-        party: (fieldMap['party'] ? row[fieldMap['party']] : '') || '',
-        amount: parseFloat(String((fieldMap['amount'] ? row[fieldMap['amount']] : '0') || '0').replace(/,/g, '')),
-        narration: (fieldMap['narration'] ? row[fieldMap['narration']] : '') || '',
-        dueDays: parseInt(String((fieldMap['dueDays'] ? row[fieldMap['dueDays']] : '') || dueDays)),
-        mobileNo: (fieldMap['mobileNo'] ? row[fieldMap['mobileNo']] : '') || '',
-        comment: (fieldMap['comment'] ? row[fieldMap['comment']] : '') || '',
-        colour: (fieldMap['colour'] ? row[fieldMap['colour']] : '') || '',
+        party: String(row[fieldMap['party']] || ''),
+        amount: parseFloat(String(row[fieldMap['amount']] || '0').replace(/,/g, '')),
+        narration: String(row[fieldMap['narration']] || ''),
+        dueDays: parseInt(String(row[fieldMap['dueDays']] || dueDays)),
+        mobileNo: String(row[fieldMap['mobileNo']] || ''),
+        comment: String(row[fieldMap['comment']] || ''),
+        colour: String(row[fieldMap['colour']] || ''),
         timestamp,
         monthYear,
         searchString: ''
     };
 
+    // Pre-calculate lowercase search string once
     entry.searchString = `${entry.invoiceNo} ${entry.party} ${entry.mobileNo} ${entry.narration} ${entry.amount}`.toLowerCase();
     return entry;
 }
@@ -233,7 +233,7 @@ export async function updateLedgerEntry(invoiceNo: string, newStatus: string, ye
     }
 }
 
-function fetchAllYearsData(ignoreCache = false): Promise<LedgerEntry[]> {
+export async function fetchAllYearsData(ignoreCache = false): Promise<LedgerEntry[]> {
     const years = Object.keys(YEAR_GIDS) as (keyof typeof YEAR_GIDS)[];
     return Promise.all(years.map(year => fetchLedgerData(year, ignoreCache))).then(res => res.flat());
 }
