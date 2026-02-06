@@ -1387,21 +1387,22 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex-1 min-h-0 bg-slate-50 relative overflow-hidden">
-              <AutoSizer renderProp={({ height, width }: { height: number, width: number }) => (
-                <List
-                  height={height}
-                  width={width}
-                  rowCount={filteredData.length}
-                  rowHeight={165}
-                  className="no-scrollbar"
-                  rowComponent={Row}
-                  rowProps={{
-                    data: filteredData,
-                    onUpdateStatus: handleUpdateStatus,
-                    updatingInvoice
-                  }}
-                />
-              )} />
+              <AutoSizer
+                renderProp={({ height, width }: { height: number | undefined; width: number | undefined }) => (
+                  <List
+                    style={{ height: height || 0, width: width || 0 }}
+                    rowCount={filteredData.length}
+                    rowHeight={165}
+                    className="no-scrollbar"
+                    rowComponent={Row}
+                    rowProps={{
+                      data: filteredData,
+                      onUpdateStatus: handleUpdateStatus,
+                      updatingInvoice
+                    }}
+                  />
+                )}
+              />
             </div>
 
             {filteredData.length === 0 && (
