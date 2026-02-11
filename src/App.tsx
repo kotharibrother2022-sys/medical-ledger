@@ -296,13 +296,11 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
 const LedgerView = ({
   data,
   selectedParty,
-  setSelectedParty,
-  minOverdueDays
+  setSelectedParty
 }: {
   data: LedgerEntry[],
   selectedParty: string,
-  setSelectedParty: (party: string) => void,
-  minOverdueDays: number
+  setSelectedParty: (party: string) => void
 }) => {
   const [showDueOnly, setShowDueOnly] = useState(false);
 
@@ -376,11 +374,6 @@ const LedgerView = ({
       // 1. Party Match
       if (entry.party !== selectedParty) return false;
 
-
-
-      // 3. Min Overdue Days Match
-      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
-
       // 3. Due Only Match
       if (showDueOnly) {
         const status = (entry.narration || '').toLowerCase();
@@ -392,7 +385,7 @@ const LedgerView = ({
 
       return true;
     });
-  }, [data, selectedParty, showDueOnly, minOverdueDays]);
+  }, [data, selectedParty, showDueOnly]);
 
   // Calculate Totals
   const totals = useMemo(() => {
@@ -516,19 +509,14 @@ const LedgerView = ({
 const AgeingView = ({
   data,
   selectedGroup,
-  minOverdueDays,
   onPartyClick
 }: {
   data: LedgerEntry[],
   selectedGroup: string,
-  minOverdueDays: number,
   onPartyClick: (party: string) => void
 }) => {
   const filteredData = useMemo(() => {
     return data.filter(entry => {
-      // 0. Min Filter
-      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
-
       // 1. Must be strictly DUE (not settled)
       const status = (entry.narration || '').toLowerCase();
       const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
@@ -542,7 +530,7 @@ const AgeingView = ({
       if (selectedGroup === '91+ Days') return d > 90;
       return false;
     });
-  }, [data, selectedGroup, minOverdueDays]);
+  }, [data, selectedGroup]);
 
   // Totals
   const totalAmount = useMemo(() => filteredData.reduce((acc, curr) => acc + (curr.amount || 0), 0), [filteredData]);
@@ -604,23 +592,18 @@ const ReportsView = ({
   data,
   onPartyClick,
   onNarrationClick,
-  onAgeingClick,
-  minOverdueDays
+  onAgeingClick
 }: {
   data: LedgerEntry[],
   onPartyClick: (party: string) => void,
   onNarrationClick: (narration: string) => void,
-  onAgeingClick: (group: string) => void,
-  minOverdueDays: number
+  onAgeingClick: (group: string) => void
 }) => {
   const pendingData = useMemo(() => data.filter(entry => {
-    // 1. Min Overdue Filter
-    if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
-
     const status = (entry.narration || '').toLowerCase();
     const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
     return !isSettled;
-  }), [data, minOverdueDays]);
+  }), [data]);
 
   const ageingGroups = useMemo(() => {
     const groups = {
@@ -739,13 +722,11 @@ const NarrationView = ({
   data,
   selectedNarration,
   setSelectedNarration,
-  minOverdueDays,
   onPartyClick
 }: {
   data: LedgerEntry[],
   selectedNarration: string,
   setSelectedNarration: (val: string) => void,
-  minOverdueDays: number,
   onPartyClick: (party: string) => void
 }) => {
 
@@ -766,9 +747,6 @@ const NarrationView = ({
     if (!selectedNarration) return [];
 
     return data.filter(entry => {
-      // 0. Min Overdue Filter
-      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
-
       // 1. Narration Match (exact or closely matching)
       if ((entry.narration || 'BLANK') !== selectedNarration) return false;
 
@@ -778,7 +756,7 @@ const NarrationView = ({
 
       return !isSettled;
     });
-  }, [data, selectedNarration, minOverdueDays]);
+  }, [data, selectedNarration]);
 
   // Calculate Totals
   const totals = useMemo(() => {
@@ -1125,7 +1103,6 @@ const AppContent: React.FC = () => {
     document.title = "KOTHARI BROTHERS";
   }, [selectedYear, loadData]);
 
-  const [minOverdueDays, setMinOverdueDays] = useState<number>(0);
 
   const deferredSearch = useDeferredValue(searchQuery);
 
@@ -1136,17 +1113,14 @@ const AppContent: React.FC = () => {
     // Simplified filtering result container
     const results: LedgerEntry[] = [];
     let totOutstanding = 0;
-    let ovrCount = 0;
+    let totReceived = 0;
+    let totBill = 0;
 
     // SINGLE PASS LOOP
     const len = data.length;
     for (let i = 0; i < len; i++) {
       const entry = data[i];
 
-      // 0. OVERDUE THRESHOLD FILTER (New)
-      if (minOverdueDays > 0) {
-        if (entry.dueDays < minOverdueDays) continue;
-      }
 
       // 1. SEARCH FILTER
       if (hasSearch) {
@@ -1186,8 +1160,11 @@ const AppContent: React.FC = () => {
       if (!applyDateFilter()) continue;
 
       // 3. STATUS LOGIC
-      const status = (entry.narration || '').toLowerCase();
-      const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
+      const status = (entry.narration || '').toUpperCase();
+      const isExcluded = ['DELETE', 'CANCEL', 'CREDIT NOTE'].includes(status);
+      const isPaid = ['RECEIVED', 'BOOK', 'SUSPENSE'].includes(status);
+      const isOutstanding = !isExcluded && !isPaid;
+      const isSettled = isPaid || isExcluded;
 
       // 4. [PENDING_FILTER_FUNCTION]
       const applyPendingFilter = () => {
@@ -1200,21 +1177,18 @@ const AppContent: React.FC = () => {
       results.push(entry);
 
       // 5. ACCUMULATE METRICS
-      if (!isSettled) {
-        totOutstanding += entry.amount;
-        if (entry.dueDays > 30) {
-          ovrCount++;
-        }
-      }
+      if (!isExcluded) totBill += entry.amount;
+      if (isPaid) totReceived += entry.amount;
+      if (isOutstanding) totOutstanding += entry.amount;
     }
 
     return {
       filteredData: results,
-      metrics: { totalOutstanding: totOutstanding, overdueCount: ovrCount }
+      metrics: { totalOutstanding: totOutstanding, totalReceived: totReceived, totalBill: totBill }
     };
-  }, [data, deferredSearch, pendingOnly, showFilters, filterMonth, dateRange, minOverdueDays]);
+  }, [data, deferredSearch, pendingOnly, showFilters, filterMonth, dateRange]);
 
-  const { totalOutstanding, overdueCount } = metrics;
+  const { totalOutstanding, totalReceived, totalBill } = metrics;
 
 
 
@@ -1290,27 +1264,6 @@ const AppContent: React.FC = () => {
             </div>
           )}
 
-          <div className="relative">
-            <select
-              value={minOverdueDays}
-              onChange={(e) => setMinOverdueDays(Number(e.target.value))}
-              className={`h-full pl-3 pr-8 rounded-2xl border appearance-none font-bold text-sm outline-none transition-all ${minOverdueDays > 0
-                ? 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-200'
-                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-              style={{ backgroundImage: 'none' }}
-            >
-              <option value="0">All</option>
-              <option value="30">30+</option>
-              <option value="45">45+</option>
-              <option value="60">60+</option>
-              <option value="90">90+</option>
-              <option value="120">120+</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2">
-              <Clock size={14} className={minOverdueDays > 0 ? "text-white" : "text-gray-400"} />
-            </div>
-          </div>
 
           <button
             onClick={() => setPendingOnly(!pendingOnly)}
@@ -1419,17 +1372,23 @@ const AppContent: React.FC = () => {
         {activeTab === 'dashboard' ? (
           <>
             <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar pb-2">
-              <div className="flex-shrink-0 w-40 glass p-4 rounded-2xl border-l-4 border-primary-500 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-1">Total Due</p>
-                <p className="text-lg font-black text-primary-700">₹{(totalOutstanding / 100000).toFixed(2)}L</p>
+              <div className="flex-shrink-0 w-44 bg-white p-3 rounded-xl border-l-4 border-slate-500 shadow-sm flex flex-col justify-center">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-0.5">Total Bill</p>
+                <p className="text-base font-black text-slate-900 tabular-nums">
+                  {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(totalBill)}
+                </p>
               </div>
-              <div className="flex-shrink-0 w-40 glass p-4 rounded-2xl border-l-4 border-red-500 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-1">Overdue (30+)</p>
-                <p className="text-lg font-black text-red-700">{overdueCount}</p>
+              <div className="flex-shrink-0 w-44 bg-white p-3 rounded-xl border-l-4 border-green-500 shadow-sm flex flex-col justify-center">
+                <p className="text-[10px] font-black text-green-600 uppercase tracking-wider mb-0.5">Total Received</p>
+                <p className="text-base font-black text-green-700 tabular-nums">
+                  {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(totalReceived)}
+                </p>
               </div>
-              <div className="flex-shrink-0 w-40 glass p-4 rounded-2xl border-l-4 border-green-500 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-1">Matching</p>
-                <p className="text-lg font-black text-green-700">{filteredData.length}</p>
+              <div className="flex-shrink-0 w-44 bg-white p-3 rounded-xl border-l-4 border-red-500 shadow-sm flex flex-col justify-center">
+                <p className="text-[10px] font-black text-red-600 uppercase tracking-wider mb-0.5">Total Due</p>
+                <p className="text-base font-black text-red-700 tabular-nums">
+                  {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(totalOutstanding)}
+                </p>
               </div>
             </div>
 
@@ -1508,21 +1467,18 @@ const AppContent: React.FC = () => {
               setSelectedAgeingGroup(group);
               setActiveTab('ageing');
             }}
-            minOverdueDays={minOverdueDays}
           />
         ) : activeTab === 'ledger' ? (
           <LedgerView
             data={data}
             selectedParty={selectedParty}
             setSelectedParty={setSelectedParty}
-            minOverdueDays={minOverdueDays}
           />
         ) : activeTab === 'narration' ? (
           <NarrationView
             data={data}
             selectedNarration={selectedNarration}
             setSelectedNarration={setSelectedNarration}
-            minOverdueDays={minOverdueDays}
             onPartyClick={(party) => {
               setSelectedParty(party);
               setActiveTab('ledger');
@@ -1532,7 +1488,6 @@ const AppContent: React.FC = () => {
           <AgeingView
             data={data}
             selectedGroup={selectedAgeingGroup}
-            minOverdueDays={minOverdueDays}
             onPartyClick={(party) => {
               setSelectedParty(party);
               setActiveTab('ledger');
