@@ -228,11 +228,11 @@ const Row = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPartyCl
 const TableViewHeader = () => (
   <div className="flex bg-slate-200/50 border-b border-gray-200 px-4 py-2 text-[10px] font-black text-gray-500 uppercase tracking-tighter sticky top-0 z-10 backdrop-blur-sm">
     <div className="w-16">Inv #</div>
+    <div className="w-20 text-right pr-2">Date</div>
     <div className="flex-1 min-w-0 px-2">Party Name</div>
     <div className="w-24 text-right">Amount</div>
     <div className="w-20 text-center">Status</div>
     <div className="w-16 text-right">Age</div>
-    <div className="w-20 text-right">Date</div>
     <div className="w-20 text-right">Due Date</div>
   </div>
 );
@@ -265,6 +265,7 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
   return (
     <div style={style} className={`flex items-center px-4 border-b border-gray-100 hover:bg-blue-50/50 transition-colors cursor-pointer group ${getRowStyle()}`} onClick={() => onPartyClick(entry.party)}>
       <div className="w-16 text-[9px] font-bold text-gray-400">#{entry.invoiceNo}</div>
+      <div className="w-20 text-right text-[10px] font-bold text-gray-500 whitespace-nowrap pr-2">{entry.date}</div>
       <div className="flex-1 min-w-0 px-2">
         <div className="flex items-center gap-1.5">
           {entry.colour && (
@@ -288,7 +289,6 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
         </div>
       </div>
       <div className={`w-16 text-right text-[10px] font-black ${isOverdue ? 'text-red-600' : 'text-gray-400'}`}>{entry.dueDays}D</div>
-      <div className="w-20 text-right text-[10px] font-bold text-gray-500 whitespace-nowrap">{entry.date}</div>
       <div className="w-20 text-right text-[10px] font-bold text-blue-600 whitespace-nowrap">{entry.dueDate || '-'}</div>
     </div>
   );
