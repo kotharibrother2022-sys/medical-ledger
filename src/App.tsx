@@ -1069,8 +1069,8 @@ const AppContent: React.FC = () => {
       if (currentV !== CACHE_VERSION) {
         console.log("Cache version mismatch. Clearing IndexedDB...");
         try {
-          const years = ['25-26', '24-25', '23-24', '22-23']; // YEAR_GIDS keys
-          for (const y of years) {
+          const yearsToClear = [...Object.keys(YEAR_GIDS), 'ALL_TIME'];
+          for (const y of yearsToClear) {
             await set(`cachedLedgerData_${y}`, null);
             localStorage.removeItem(`cachedTime_${y}`);
           }
