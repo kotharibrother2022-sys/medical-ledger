@@ -9,8 +9,6 @@ import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
   Search,
   Calendar,
-  Phone,
-  IndianRupee,
   Clock,
   LayoutDashboard,
   Filter,
