@@ -20,7 +20,7 @@ export interface LedgerEntry {
     overdueDays?: number; // Days past due date (if available)
 }
 
-export const CACHE_VERSION = 'v17'; // Bumped for date format change
+export const CACHE_VERSION = 'v18'; // Bumped for unified date formatting
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
@@ -34,74 +34,83 @@ export type FinancialYear = keyof typeof YEAR_GIDS | 'ALL_TIME';
 const SHEET_BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQmnzleOlhV7JbCWGpDNtfK25POYM2ENCS4hQkIog1n3olh-TTzjPg9XSq4ox5ovA/pub?output=csv';
 
 
+// Helper to format any date input into DD MMM YYYY
+function formatDateForDisplay(value: any): string {
+    if (!value) return '';
+
+    // Handle Excel serial numbers (as string or number)
+    if (!isNaN(value) && !String(value).includes('/') && !String(value).includes('-') && !String(value).includes('.')) {
+        try {
+            const date = XLSX.SSF.parse_date_code(parseFloat(value));
+            const d = String(date.d).padStart(2, '0');
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const m = date.m - 1;
+            const y = date.y;
+            return `${d} ${months[m]} ${y}`;
+        } catch { /* ignore */ }
+    }
+
+    // Handle existing string formats
+    if (typeof value === 'string') {
+        let normalizedDate = value.replace(/[-.]/g, '/');
+        // Title case the month part if it's text-based
+        normalizedDate = normalizedDate.split('/').map(part => {
+            if (/^[a-z]{3,}$/i.test(part)) {
+                return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+            }
+            return part;
+        }).join('/');
+
+        const formats = [
+            'dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy',
+            'MM/dd/yyyy', 'yyyy/MM/dd',
+            'dd/MMM/yyyy', 'd/MMM/yyyy',
+            'dd/MMMM/yyyy', 'd/MMMM/yyyy',
+            'dd MMM yyyy', 'd MMM yyyy'
+        ];
+
+        for (const f of formats) {
+            const p = parse(normalizedDate, f, new Date());
+            if (!isNaN(p.getTime()) && p.getFullYear() > 1900 && p.getFullYear() < 2100) {
+                return format(p, 'dd MMM yyyy');
+            }
+        }
+    }
+
+    return String(value);
+}
+
 // Helper to process raw row into LedgerEntry
 function processRow(row: Record<string, string | number>, fieldMap: Record<string, string>, index: number, now: Date): LedgerEntry {
-    const dateStr = String((fieldMap['date'] ? row[fieldMap['date']] : '') || '');
+    const rawDate = (fieldMap['date'] ? row[fieldMap['date']] : '') || '';
+    const dateStr = formatDateForDisplay(rawDate);
+    const rawDueDate = (fieldMap['dueDate'] ? row[fieldMap['dueDate']] : '') || '';
+    const dueDateStr = formatDateForDisplay(rawDueDate);
+
     let dueDays = 0;
     let timestamp = 0;
     let monthYear = '';
 
     if (dateStr) {
         try {
-            let normalizedDate = dateStr.replace(/[-.]/g, '/');
-            // Title case the month part if it's text-based (e.g., 1/APR/2025 -> 1/Apr/2025)
-            normalizedDate = normalizedDate.split('/').map(part => {
-                if (/^[a-z]{3,}$/i.test(part)) {
-                    return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
-                }
-                return part;
-            }).join('/');
-
-            const formats = [
-                'dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy',
-                'MM/dd/yyyy', 'yyyy/MM/dd',
-                'dd/MMM/yyyy', 'd/MMM/yyyy',
-                'dd/MMMM/yyyy', 'd/MMMM/yyyy',
-                'dd MMM yyyy', 'd MMM yyyy'
-            ];
-            let parsedDate: Date | null = null;
-
-            for (const f of formats) {
-                const p = parse(normalizedDate, f, now);
-                if (!isNaN(p.getTime()) && p.getFullYear() > 1900 && p.getFullYear() < 2100) {
-                    parsedDate = p;
-                    break;
-                }
-            }
-
-            if (parsedDate) {
-                timestamp = parsedDate.setHours(12, 0, 0, 0); // Use mid-day for consistency regardless of timezone
+            const parsedDate = parse(dateStr, 'dd MMM yyyy', now);
+            if (!isNaN(parsedDate.getTime())) {
+                timestamp = parsedDate.setHours(12, 0, 0, 0);
                 monthYear = format(parsedDate, 'MMMM yyyy');
                 dueDays = differenceInDays(now, parsedDate);
             }
-        } catch { /* ignore parse errors */ }
+        } catch { /* ignore */ }
     }
 
-    // New: Calculate Overdue Days if Due Date exists
-    const dueDateStr = String(row[fieldMap['dueDate']] || '').trim();
     let overdueDays: number | undefined = undefined;
     if (dueDateStr) {
         try {
-            // Simplified parsing for Due Date
-            const safeDueDate = dueDateStr.replace(/[-.]/g, '/');
-            // Try formats: script now generates "dd/MM/yyyy", but handle variants too
-            const formats = ['dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy', 'dd MMM yyyy'];
-            let d = new Date(NaN);
-
-            for (const f of formats) {
-                const p = parse(safeDueDate, f, now);
-                if (!isNaN(p.getTime())) {
-                    d = p;
-                    break;
-                }
+            const parsedDueDate = parse(dueDateStr, 'dd MMM yyyy', now);
+            if (!isNaN(parsedDueDate.getTime())) {
+                overdueDays = differenceInDays(now, parsedDueDate);
             }
-
-            if (!isNaN(d.getTime())) {
-                overdueDays = differenceInDays(now, d);
-            }
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
-
 
     const entry: LedgerEntry = {
         sNo: String(row[fieldMap['sNo']] || index + 1),
@@ -110,7 +119,7 @@ function processRow(row: Record<string, string | number>, fieldMap: Record<strin
         party: String(row[fieldMap['party']] || ''),
         amount: parseFloat(String(row[fieldMap['amount']] || '0').replace(/[₹,\s]/g, '')) || 0,
         narration: String(row[fieldMap['narration']] || ''),
-        dueDays: parseInt(String(row[fieldMap['dueDays']] || dueDays)),
+        dueDays: isNaN(parseInt(String(row[fieldMap['dueDays']]))) ? dueDays : parseInt(String(row[fieldMap['dueDays']])),
         mobileNo: String(row[fieldMap['mobileNo']] || '').trim(),
         comment: String(row[fieldMap['comment']] || '').trim(),
         colour: String(row[fieldMap['colour']] || '').trim(),

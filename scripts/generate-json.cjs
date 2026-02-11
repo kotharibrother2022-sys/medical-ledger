@@ -11,41 +11,54 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 // Convert Excel Serial Date to DD Mon YYYY (e.g., 01 Apr 2025)
-// Convert Excel Serial Date to DD Mon YYYY (e.g., 01 Apr 2025)
+// Helper to format any date input into DD MMM YYYY
 function formatExcelDate(value) {
     if (!value) return '';
 
-    // If it's a string that looks like a number (e.g. "45748"), convert it to number first
+    // Handle Excel serial numbers (as string or number)
     if (!isNaN(value) && !String(value).includes('/') && !String(value).includes('-') && !String(value).includes('.')) {
-        value = parseFloat(value);
-    }
-
-    // If it's already a string with separators, parse and reformat it
-    if (typeof value === 'string' && (value.includes('/') || value.includes('-') || value.includes('.'))) {
         try {
-            // Parse DD/MM/YYYY or similar formats
-            const parts = value.replace(/[-.]/g, '/').split('/');
-            if (parts.length === 3) {
-                const d = parseInt(parts[0]);
-                const m = parseInt(parts[1]) - 1; // 0-indexed
-                const y = parseInt(parts[2]);
-                const date = new Date(y, m, d);
-                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                return `${String(d).padStart(2, '0')} ${months[m]} ${y}`;
-            }
-        } catch (e) {
-            return value; // Return original if parsing fails
-        }
+            const date = XLSX.SSF.parse_date_code(parseFloat(value));
+            const d = String(date.d).padStart(2, '0');
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const m = date.m - 1;
+            const y = date.y;
+            return `${d} ${months[m]} ${y}`;
+        } catch (e) { /* ignore */ }
     }
 
-    // If it's a number (Excel serial date)
-    if (typeof value === 'number') {
-        const date = XLSX.SSF.parse_date_code(value);
-        const d = String(date.d).padStart(2, '0');
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const m = date.m - 1; // XLSX returns 1-indexed month
-        const y = date.y;
-        return `${d} ${months[m]} ${y}`;
+    // Handle existing string formats
+    if (typeof value === 'string') {
+        let normalizedDate = value.replace(/[-.]/g, '/');
+        // Title case the month part if it's text-based (e.g., 1/APR/2025 -> 1/Apr/2025)
+        normalizedDate = normalizedDate.split('/').map(part => {
+            if (/^[a-z]{3,}$/i.test(part)) {
+                return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+            }
+            return part;
+        }).join('/');
+
+        const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        // Try to parse DD/MM/YYYY or D/M/YYYY
+        const parts = normalizedDate.split('/');
+        if (parts.length === 3) {
+            let d = parseInt(parts[0]);
+            let m = -1;
+            let y = parseInt(parts[2]);
+
+            // check if month is text or number
+            if (isNaN(parts[1])) {
+                m = monthsShort.findIndex(ms => ms === parts[1]);
+            } else {
+                m = parseInt(parts[1]) - 1;
+            }
+
+            if (m >= 0 && m < 12 && !isNaN(d) && !isNaN(y)) {
+                if (y < 100) y += 2000;
+                return `${String(d).padStart(2, '0')} ${monthsShort[m]} ${y}`;
+            }
+        }
     }
 
     return String(value);
