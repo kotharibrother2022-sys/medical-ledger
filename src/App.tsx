@@ -1217,7 +1217,7 @@ const AppContent: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
                 <div className="flex gap-1 items-center">
-                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">v11</span>
+                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION}</span>
                   <span className="bg-slate-100 text-slate-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-slate-200">RAW: {data.length}</span>
                 </div>
               </div>
