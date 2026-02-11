@@ -13,12 +13,14 @@ export interface LedgerEntry {
     mobileNo: string;
     comment: string;
     colour: string;
+    dueDate?: string; // Due date for payment
     timestamp: number; // Pre-parsed date for fast filtering
     monthYear: string; // Pre-formatted month-year for fast month filtering
     searchString: string; // Pre-calculated lowercase string for fast search
+    overdueDays?: number; // Days past due date (if available)
 }
 
-export const CACHE_VERSION = 'v11'; // Complete reset to clean up all experiments
+export const CACHE_VERSION = 'v17'; // Bumped for date format change
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
@@ -33,43 +35,94 @@ const SHEET_BASE_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQmnzleO
 
 
 // Helper to process raw row into LedgerEntry
-function processRow(row: any, fieldMap: Record<string, string>, index: number, now: Date): LedgerEntry {
-    const dateStr = (fieldMap['date'] ? row[fieldMap['date']] : '') || '';
+function processRow(row: Record<string, string | number>, fieldMap: Record<string, string>, index: number, now: Date): LedgerEntry {
+    const dateStr = String((fieldMap['date'] ? row[fieldMap['date']] : '') || '');
     let dueDays = 0;
     let timestamp = 0;
     let monthYear = '';
 
     if (dateStr) {
         try {
-            // Speed optimization: simple character replacement instead of regex where possible
-            const normalizedDate = dateStr.indexOf('-') !== -1 ? dateStr.replace(/-/g, '/') : dateStr.replace(/\./g, '/');
-            const parsedDate = parse(normalizedDate, 'dd/MM/yyyy', now);
-            if (parsedDate.getTime()) {
-                timestamp = parsedDate.getTime();
+            let normalizedDate = dateStr.replace(/[-.]/g, '/');
+            // Title case the month part if it's text-based (e.g., 1/APR/2025 -> 1/Apr/2025)
+            normalizedDate = normalizedDate.split('/').map(part => {
+                if (/^[a-z]{3,}$/i.test(part)) {
+                    return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+                }
+                return part;
+            }).join('/');
+
+            const formats = [
+                'dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy',
+                'MM/dd/yyyy', 'yyyy/MM/dd',
+                'dd/MMM/yyyy', 'd/MMM/yyyy',
+                'dd/MMMM/yyyy', 'd/MMMM/yyyy',
+                'dd MMM yyyy', 'd MMM yyyy'
+            ];
+            let parsedDate: Date | null = null;
+
+            for (const f of formats) {
+                const p = parse(normalizedDate, f, now);
+                if (!isNaN(p.getTime()) && p.getFullYear() > 1900 && p.getFullYear() < 2100) {
+                    parsedDate = p;
+                    break;
+                }
+            }
+
+            if (parsedDate) {
+                timestamp = parsedDate.setHours(12, 0, 0, 0); // Use mid-day for consistency regardless of timezone
                 monthYear = format(parsedDate, 'MMMM yyyy');
                 dueDays = differenceInDays(now, parsedDate);
             }
-        } catch (e) { /* ignore parse errors */ }
+        } catch { /* ignore parse errors */ }
     }
+
+    // New: Calculate Overdue Days if Due Date exists
+    const dueDateStr = String(row[fieldMap['dueDate']] || '').trim();
+    let overdueDays: number | undefined = undefined;
+    if (dueDateStr) {
+        try {
+            // Simplified parsing for Due Date
+            const safeDueDate = dueDateStr.replace(/[-.]/g, '/');
+            // Try formats: script now generates "dd/MM/yyyy", but handle variants too
+            const formats = ['dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy', 'dd MMM yyyy'];
+            let d = new Date(NaN);
+
+            for (const f of formats) {
+                const p = parse(safeDueDate, f, now);
+                if (!isNaN(p.getTime())) {
+                    d = p;
+                    break;
+                }
+            }
+
+            if (!isNaN(d.getTime())) {
+                overdueDays = differenceInDays(now, d);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
 
     const entry: LedgerEntry = {
         sNo: String(row[fieldMap['sNo']] || index + 1),
         invoiceNo: String(row[fieldMap['invoiceNo']] || ''),
         date: dateStr,
         party: String(row[fieldMap['party']] || ''),
-        amount: parseFloat(String(row[fieldMap['amount']] || '0').replace(/,/g, '')),
+        amount: parseFloat(String(row[fieldMap['amount']] || '0').replace(/[₹,\s]/g, '')) || 0,
         narration: String(row[fieldMap['narration']] || ''),
         dueDays: parseInt(String(row[fieldMap['dueDays']] || dueDays)),
-        mobileNo: String(row[fieldMap['mobileNo']] || ''),
-        comment: String(row[fieldMap['comment']] || ''),
-        colour: String(row[fieldMap['colour']] || ''),
+        mobileNo: String(row[fieldMap['mobileNo']] || '').trim(),
+        comment: String(row[fieldMap['comment']] || '').trim(),
+        colour: String(row[fieldMap['colour']] || '').trim(),
+        dueDate: dueDateStr,
+        overdueDays,
         timestamp,
         monthYear,
         searchString: ''
     };
 
     // Pre-calculate lowercase search string once
-    entry.searchString = `${entry.invoiceNo} ${entry.party} ${entry.mobileNo} ${entry.narration} ${entry.amount}`.toLowerCase();
+    entry.searchString = `${entry.invoiceNo} ${entry.party} ${entry.mobileNo} ${entry.narration} ${entry.amount} ${!entry.narration ? 'blank' : ''}`.toLowerCase();
     return entry;
 }
 
@@ -79,8 +132,14 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
     // Strategy: First try fetching from our lightning-fast split JSON store
     if (!ignoreCache) {
         try {
-            // Construct filename: "25-26" -> "ledger-25_26.json"
-            const safeYear = year.replace(/-/g, '_').toLowerCase();
+            // Construct filename: "25-26" -> "ledger-25_26.json" normally
+            // BUT, if year is "25-26", check for "ledger-2526.json" first as per new sheet naming
+            let safeYear = year.replace(/-/g, '_').toLowerCase();
+            if (year === '25-26') {
+                // Try the new convention first
+                safeYear = '2526';
+            }
+
             const jsonUrl = `/data/ledger-${safeYear}.json`;
             const response = await fetch(`${jsonUrl}?t=${Date.now()}`);
 
@@ -88,16 +147,37 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                 const rawData = await response.json();
 
                 if (rawData && Array.isArray(rawData)) {
-                    console.log(`⚡ Loaded ${year} from split JSON store`);
+                    console.log(`⚡ Loaded ${year} from split JSON store (${jsonUrl})`);
 
                     // If the JSON is already pre-processed (has searchString), return it directly for extreme speed
-                    if (rawData.length > 0 && (rawData[0] as any).searchString) {
+                    if (rawData.length > 0 && (rawData[0] as LedgerEntry).searchString) {
                         const now = new Date();
-                        // Optional: Update dueDays based on current date if needed
+                        // Update dueDays (Age) and overdueDays based on current date
                         return (rawData as LedgerEntry[]).map(entry => {
                             if (entry.timestamp) {
                                 entry.dueDays = differenceInDays(now, new Date(entry.timestamp));
                             }
+
+                            // Recalculate overdueDays if dueDate is present
+                            if (entry.dueDate) {
+                                try {
+                                    // Parse "DD/MM/YYYY" or variants
+                                    const formats = ['dd/MM/yyyy', 'dd/MM/yy', 'd/M/yyyy', 'd/M/yy', 'dd MMM yyyy'];
+                                    let d = new Date(NaN);
+                                    for (const f of formats) {
+                                        const p = parse(entry.dueDate, f, now);
+                                        if (!isNaN(p.getTime())) {
+                                            d = p;
+                                            break;
+                                        }
+                                    }
+
+                                    if (!isNaN(d.getTime())) {
+                                        entry.overdueDays = differenceInDays(now, d);
+                                    }
+                                } catch (e) { }
+                            }
+
                             return entry;
                         });
                     }
@@ -107,7 +187,8 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                     const mappings = {
                         date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.'],
                         party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR'],
+                        dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
                     };
 
                     const firstRow = rawData[0] || {};
@@ -119,7 +200,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                         if (found) fieldMap[key] = found;
                     });
 
-                    return rawData.map((row, i) => processRow(row, fieldMap, i, now));
+                    return rawData.map((row, i) => processRow(row as Record<string, string | number>, fieldMap, i, now));
                 }
             }
         } catch (e) {
@@ -136,7 +217,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
             Papa.parse(url, {
                 download: true, header: true, skipEmptyLines: true, worker: false, // Worker false for better error handling in some cases
                 complete: (results) => {
-                    const data = results.data as any[];
+                    const data = results.data as Record<string, string | number>[];
                     // Check for Google Sheet Errors
                     if (!data || data.length === 0 || (data.length > 0 && Object.values(data[0]).some(v => String(v).includes('#ERROR')))) {
                         reject(new Error("Google Sheet returned #ERROR! or empty data"));
@@ -146,9 +227,16 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                     const fields = results.meta.fields || [];
                     const fieldMap: Record<string, string> = {};
                     const mappings = {
-                        date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
-                        party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+                        date: ['DATE'], sNo: ['S.NO.', 's.no.'],
+                        invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.', 'INVOICE         NO. ', 'CHALLAN NO. ', 'INVOICE NO. '],
+                        party: ['PARTY', 'name', 'party', 'NAME'],
+                        amount: ['AMOUNT', 'amount'],
+                        narration: ['NARRATION', 'narration'],
+                        dueDays: ['DUE DAYS', 'due days'],
+                        mobileNo: ['MOBILE NO.', 'mobile no.', 'MOBILE NO. '],
+                        comment: ['COMMENT', 'comment'],
+                        colour: ['COLOUR', 'colour'],
+                        dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
                     };
 
                     Object.entries(mappings).forEach(([key, possibleKeys]) => {
@@ -190,7 +278,8 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
             const mappings = {
                 date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
                 party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR']
+                dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR'],
+                dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
             };
 
             const firstRow = rawData[0] || {};
@@ -202,7 +291,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                 if (found) fieldMap[key] = found;
             });
 
-            return rawData.map((row, i) => processRow(row, fieldMap, i, now));
+            return rawData.map((row, i) => processRow(row as Record<string, string | number>, fieldMap, i, now));
 
         } catch (localError) {
             console.error("Critical: All data sources failed", localError);

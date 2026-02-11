@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
-import { SpeedInsights } from "@vercel/speed-insights/react"
+console.log('[DEBUG] App.tsx module loading...');
+import React, { useState, useEffect, useMemo, useDeferredValue, useCallback } from 'react';
 import { get, set } from 'idb-keyval';
-import { fetchLedgerData, fetchAllYearsData, updateLedgerEntry, getTestUrl, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
+import { fetchLedgerData, fetchAllYearsData, updateLedgerEntry, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
+// @ts-ignore
 import { List } from 'react-window';
+// @ts-ignore
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
   Search,
-  RefreshCcw,
   Calendar,
   Phone,
   IndianRupee,
@@ -18,20 +19,101 @@ import {
   FileText,
   FileDown,
   Tags,
-  ChevronRight,
   Check,
+
   BookOpen,
-  CalendarDays,
-  ExternalLink
+  RefreshCw,
+  LayoutGrid,
+  List as ListIcon
 } from 'lucide-react';
 import { format, parse } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const Row = (props: any) => {
-  const { index, style, data: entries, onUpdateStatus, updatingInvoice } = props;
-  const entry = entries?.[index];
-  if (!entry) return null;
+// Define type for jsPDF with AutoTable
+interface jsPDFWithAutoTable extends jsPDF {
+  lastAutoTable: {
+    finalY: number;
+  };
+}
+
+// --- Shared PDF Generator ---
+const generateAndSharePDF = async (entries: LedgerEntry[], title: string, subtitle: string, totalLabel: string = "TOTAL DUE") => {
+  if (!entries || entries.length === 0) return;
+
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Header
+  doc.setFontSize(22);
+  doc.setTextColor(37, 99, 235);
+  doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
+  doc.line(20, 35, pageWidth - 20, 35);
+
+  // Metadata
+  doc.setFontSize(14);
+  doc.setTextColor(0);
+  doc.text(title.toUpperCase(), 20, 45);
+  doc.setFontSize(10);
+  doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
+  doc.text(subtitle, 20, 57);
+
+  // Table
+  const tableData = entries.map(entry => [
+    entry.date,
+    entry.party,
+    entry.invoiceNo,
+    `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+  ]);
+
+  autoTable(doc, {
+    startY: 65,
+    head: [['Date', 'Party Name', 'Invoice No', 'Amount']],
+    body: tableData,
+    theme: 'grid',
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    columnStyles: { 3: { halign: 'right' } }
+  });
+
+  // Footer / Totals
+  const totalAmount = entries.reduce((sum, e) => sum + (e.amount || 0), 0);
+  // Use the extended type to access lastAutoTable
+  const finalY = (doc as jsPDFWithAutoTable).lastAutoTable.finalY + 10;
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`${totalLabel}: Rs. ${totalAmount.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'italic');
+  doc.text('Computer generated statement.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+  // Share
+  const pdfBlob = doc.output('blob');
+  const fileName = `${title.replace(/[^a-z0-9]/gi, '_')}.pdf`;
+  const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: title,
+        text: `Please find attached: ${title}. ${totalLabel}: Rs. ${totalAmount.toLocaleString('en-IN')}`
+      });
+    } catch (err) {
+      console.error('Share failed', err);
+      // doc.save(fileName); // Optional: Auto download on fail? User might prefer just staying.
+    }
+  } else {
+    doc.save(fileName);
+    alert("Sharing not supported on this device/browser. File downloaded.");
+  }
+};
+
+// --- Compact Card Component (Unified High-Density UI) ---
+const CompactCard = ({ entry, onUpdateStatus, updatingInvoice, onPartyClick }: any) => {
   const status = (entry.narration || '').toLowerCase();
   const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
   const isOverdue = entry.dueDays > 30 && !isSettled;
@@ -40,103 +122,174 @@ const Row = (props: any) => {
   const isUpdating = updatingInvoice === entry.invoiceNo;
 
   const colourLower = (entry.colour || '').toLowerCase();
+
+  // Debug: Log color values to console
+  if (entry.colour) {
+    console.log(`[COLOR DEBUG] Invoice ${entry.invoiceNo}: colour="${entry.colour}", colourLower="${colourLower}"`);
+  }
+
   const getCardStyle = () => {
     if (isReceived) return 'border-green-200 bg-green-50/40';
     if (isCancelled) return 'border-gray-200 bg-gray-50/30 grayscale opacity-70';
-    if (colourLower.includes('yellow')) return 'border-amber-400 bg-amber-50 shadow-sm ring-1 ring-amber-200/50';
-    if (colourLower.includes('red')) return 'border-red-400 bg-red-50 shadow-sm ring-1 ring-red-200/50';
-    if (colourLower.includes('blue')) return 'border-blue-400 bg-blue-50 shadow-sm ring-1 ring-blue-200/50';
-    if (colourLower.includes('green')) return 'border-green-400 bg-green-50 shadow-sm ring-1 ring-green-200/50';
+    if (entry.comment) return 'border-l-4 border-l-amber-400 border-y border-r border-gray-200 bg-amber-50/30 shadow-md transform scale-[1.01]';
+    if (colourLower.includes('yellow')) return 'border-amber-400 bg-yellow-100 shadow-md ring-1 ring-amber-300';
+    if (colourLower.includes('red')) return 'border-red-400 bg-red-100 shadow-md ring-1 ring-red-200';
+    if (colourLower.includes('blue')) return 'border-blue-400 bg-blue-100 shadow-md ring-1 ring-blue-200';
+    if (colourLower.includes('green')) return 'border-green-400 bg-green-100 shadow-md ring-1 ring-green-200';
     if (isOverdue) return 'border-red-200 bg-red-50/30';
     return 'border-blue-100 bg-white/50';
   };
 
   return (
-    <div style={style} className="px-4 py-2">
-      <div className={`glass rounded-xl p-4 transition-all hover:scale-[1.01] active:scale-95 ${getCardStyle()} ${isUpdating ? 'opacity-50 animate-pulse' : ''}`}>
-        <div className="flex justify-between items-start mb-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-[10px] font-black text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded leading-none uppercase tracking-tighter">
-                {entry.invoiceNo}
-              </span>
-              {(entry.comment || entry.colour) && (
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                  <span className="text-[9px] font-bold text-red-600 uppercase truncate max-w-[150px]">
-                    {[entry.comment, entry.colour].filter(Boolean).join(' | ')}
-                  </span>
-                </div>
-              )}
-            </div>
-            <h3 className="font-bold text-gray-800 line-clamp-1">{entry.party}</h3>
-          </div>
-          <button
-            disabled={isUpdating}
-            onClick={() => onUpdateStatus(entry.invoiceNo, entry.narration)}
-            className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ml-2 transition-transform active:scale-90 ${isReceived ? 'bg-green-100 text-green-700' :
+    <div
+      onClick={() => onPartyClick && onPartyClick(entry.party)}
+      className={`glass rounded-xl p-3.5 transition-all hover:scale-[1.01] active:scale-95 cursor-pointer ${getCardStyle()} ${isUpdating ? 'opacity-50 animate-pulse' : ''}`}
+    >
+      <div className="flex justify-between items-center mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] font-black text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded leading-none uppercase border border-primary-100">
+            #{entry.invoiceNo}
+          </span>
+          {entry.colour && (
+            <div
+              className="w-2.5 h-2.5 rounded-full shadow-sm ring-1 ring-white"
+              style={{ backgroundColor: entry.colour.toLowerCase() }}
+            />
+          )}
+        </div>
+        <div className="flex items-center text-gray-900">
+          <span className="text-base font-black tracking-tight">₹{(entry.amount || 0).toLocaleString('en-IN')}</span>
+        </div>
+      </div>
+
+      <h3 className="text-sm font-black text-gray-800 leading-none mb-2.5 truncate uppercase tracking-tight">{entry.party}</h3>
+
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2 items-center">
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onUpdateStatus) onUpdateStatus(entry.invoiceNo, entry.narration);
+            }}
+            className={`px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase whitespace-nowrap shadow-sm cursor-pointer hover:opacity-80 transition-opacity ${isReceived ? 'bg-green-100 text-green-700' :
               isCancelled ? 'bg-gray-100 text-gray-700' :
                 isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
               }`}>
-            {isUpdating ? 'SAVING...' : (entry.narration || 'PENDING')}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-sm mt-2">
-          <div className="flex items-center text-gray-700">
-            <div className="bg-white/50 p-1 rounded mr-2"><IndianRupee size={12} className="text-primary-600" /></div>
-            <span className="font-bold whitespace-nowrap">₹{(entry.amount || 0).toLocaleString('en-IN')}</span>
-          </div>
-          <div className="flex items-center text-gray-600 justify-end">
-            <Calendar size={14} className="mr-1" />
-            <span className="text-xs">{entry.date}</span>
-          </div>
-          <div className="flex items-center text-gray-600">
-            <div className={`p-1 rounded mr-2 ${isOverdue ? 'bg-red-100' : 'bg-white/50'}`}>
-              <Clock size={12} className={isOverdue ? 'text-red-600' : 'text-gray-400'} />
-            </div>
-            <span className={`text-xs font-bold ${isOverdue ? 'text-red-600' : ''}`}>{entry.dueDays} Days</span>
+            {entry.narration || 'UNPAID'}
           </div>
 
-          <div className="flex items-center justify-end gap-2 col-span-2 mt-1 pt-1 border-t border-gray-100">
-            {entry.mobileNo ? (
-              <div className="flex gap-3">
-                <a
-                  href={`tel:${entry.mobileNo}`}
-                  className="w-8 h-8 flex items-center justify-center text-white bg-green-500 hover:bg-green-600 rounded-full transition-all shadow-sm hover:shadow active:scale-90"
-                  onClick={(e) => e.stopPropagation()}
-                  title="Call Party"
-                >
-                  <Phone size={14} className="fill-current" />
-                </a>
-                <a
-                  href={`https://wa.me/91${entry.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                    `Hello ${entry.party}, your payment of ₹${(entry.amount || 0).toLocaleString('en-IN')} for Bill ${entry.invoiceNo} dated ${entry.date} is pending (${entry.dueDays} days overdue). Please clear it at the earliest. - Kothari Brothers`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-8 h-8 flex items-center justify-center text-white bg-[#25D366] hover:bg-[#128C7E] rounded-full transition-all shadow-sm hover:shadow active:scale-90"
-                  onClick={(e) => e.stopPropagation()}
-                  title="Send WhatsApp"
-                >
-                  <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-[#25D366]">W</span>
-                  </div>
-                </a>
-              </div>
-            ) : (
-              <div className="flex items-center text-gray-400 bg-gray-50 px-2 py-1 rounded-lg border border-gray-100 opacity-50">
-                <Phone size={12} className="mr-1" />
-                <span className="text-[10px] font-bold">N/A</span>
-              </div>
-            )}
+          <div className="flex items-center text-gray-500 bg-white/40 px-1.5 py-0.5 rounded border border-gray-50">
+            <Calendar size={10} className="mr-1 opacity-60" />
+            <span className="text-[10px] font-bold">{entry.date}</span>
           </div>
         </div>
+
+        <div className={`flex items-center text-[10px] font-black px-1.5 py-0.5 rounded-lg ${isOverdue ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-50 text-gray-500 border border-gray-100'}`}>
+          <Clock size={10} className="mr-1 opacity-70" />
+          <span>{entry.dueDays}D</span>
+        </div>
       </div>
-      {/* Separator Line */}
-      <div className="absolute bottom-2 left-0 right-0 flex justify-center opacity-30">
-        <div className="w-[90%] border-b-2 border-dashed border-gray-300"></div>
+
+      {entry.dueDate && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[9px] font-bold text-blue-700/80 bg-blue-50/50 px-2 py-0.5 rounded border border-blue-100/30">
+          <Calendar size={10} className="opacity-60" />
+          <span>Due: {entry.dueDate}</span>
+        </div>
+      )}
+
+      {entry.comment && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[9px] font-bold text-amber-700/80 bg-amber-50/50 px-2 py-0.5 rounded border border-amber-100/30 italic truncate">
+          <FileText size={10} className="opacity-60" />
+          <span>"{entry.comment}"</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Row = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPartyClick }: any) => {
+  if (!entries) return null;
+  const entry = entries?.[index];
+  if (!entry) return null;
+
+  return (
+    <div style={style} className="px-4 py-1.5">
+      <CompactCard
+        entry={entry}
+        onUpdateStatus={onUpdateStatus}
+        updatingInvoice={updatingInvoice}
+        onPartyClick={onPartyClick}
+      />
+    </div>
+  );
+};
+
+// --- Table View Header ---
+const TableViewHeader = () => (
+  <div className="flex bg-slate-200/50 border-b border-gray-200 px-4 py-2 text-[10px] font-black text-gray-500 uppercase tracking-tighter sticky top-0 z-10 backdrop-blur-sm">
+    <div className="w-16">Inv #</div>
+    <div className="flex-1 min-w-0 px-2">Party Name</div>
+    <div className="w-24 text-right">Amount</div>
+    <div className="w-20 text-center">Status</div>
+    <div className="w-16 text-right">Age</div>
+    <div className="w-20 text-right">Date</div>
+    <div className="w-20 text-right">Due Date</div>
+  </div>
+);
+
+// --- Table View Row ---
+const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPartyClick }: any) => {
+  if (!entries) return null;
+  const entry = entries?.[index];
+  if (!entry) return null;
+
+  const status = (entry.narration || '').toLowerCase();
+  const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
+  const isOverdue = entry.dueDays > 30 && !isSettled;
+  const isReceived = status === 'received';
+  const isCancelled = status === 'cancel' || status === 'credit note' || status === 'delete';
+  const isUpdating = updatingInvoice === entry.invoiceNo;
+
+  const colourLower = (entry.colour || '').toLowerCase();
+  const getRowStyle = () => {
+    if (isReceived) return 'bg-green-50/20';
+    if (isCancelled) return 'bg-gray-50/40 grayscale opacity-60';
+    if (colourLower.includes('yellow')) return 'bg-yellow-100 border-amber-200';
+    if (colourLower.includes('red')) return 'bg-red-100 border-red-200';
+    if (colourLower.includes('blue')) return 'bg-blue-100 border-blue-200';
+    if (colourLower.includes('green')) return 'bg-green-100 border-green-200';
+    if (isOverdue) return 'bg-red-50/20';
+    return (index % 2 === 0) ? 'bg-white' : 'bg-slate-50/30';
+  };
+
+  return (
+    <div style={style} className={`flex items-center px-4 border-b border-gray-100 hover:bg-blue-50/50 transition-colors cursor-pointer group ${getRowStyle()}`} onClick={() => onPartyClick(entry.party)}>
+      <div className="w-16 text-[9px] font-bold text-gray-400">#{entry.invoiceNo}</div>
+      <div className="flex-1 min-w-0 px-2">
+        <div className="flex items-center gap-1.5">
+          {entry.colour && (
+            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.colour.toLowerCase() }} />
+          )}
+          <span className="text-[11px] font-black text-gray-800 truncate leading-none uppercase tracking-tight">{entry.party}</span>
+        </div>
       </div>
+      <div className="w-24 text-right text-[11px] font-black text-gray-900 leading-none">₹{(entry.amount || 0).toLocaleString('en-IN')}</div>
+      <div className="w-20 flex justify-center px-2">
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onUpdateStatus) onUpdateStatus(entry.invoiceNo, entry.narration);
+          }}
+          className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase whitespace-nowrap border shadow-xs transition-opacity ${isReceived ? 'bg-green-100 text-green-700 border-green-200' :
+            isCancelled ? 'bg-gray-100 text-gray-700 border-gray-200' :
+              isOverdue ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-100 text-blue-700 border-blue-200'
+            } ${isUpdating ? 'animate-pulse opacity-50' : 'hover:opacity-80'}`}>
+          {entry.narration || 'UNPAID'}
+        </div>
+      </div>
+      <div className={`w-16 text-right text-[10px] font-black ${isOverdue ? 'text-red-600' : 'text-gray-400'}`}>{entry.dueDays}D</div>
+      <div className="w-20 text-right text-[10px] font-bold text-gray-500 whitespace-nowrap">{entry.date}</div>
+      <div className="w-20 text-right text-[10px] font-bold text-blue-600 whitespace-nowrap">{entry.dueDate || '-'}</div>
     </div>
   );
 };
@@ -145,14 +298,15 @@ const Row = (props: any) => {
 const LedgerView = ({
   data,
   selectedParty,
-  setSelectedParty
+  setSelectedParty,
+  minOverdueDays
 }: {
   data: LedgerEntry[],
   selectedParty: string,
-  setSelectedParty: (party: string) => void
+  setSelectedParty: (party: string) => void,
+  minOverdueDays: number
 }) => {
   const [showDueOnly, setShowDueOnly] = useState(false);
-  const [narrationFilter, setNarrationFilter] = useState('');
 
   const exportToPDF = () => {
     if (!selectedParty || partyLedger.length === 0) return;
@@ -183,7 +337,7 @@ const LedgerView = ({
     const tableData = partyLedger.map(entry => [
       entry.date,
       entry.invoiceNo,
-      entry.narration || '-',
+      entry.narration || 'BLANK',
       `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
     ]);
 
@@ -197,7 +351,7 @@ const LedgerView = ({
       columnStyles: { 3: { halign: 'right' } }
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    const finalY = (doc as jsPDFWithAutoTable).lastAutoTable.finalY + 10;
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`TOTAL BALANCE DUE: Rs. ${totals.totalDue.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
@@ -209,70 +363,7 @@ const LedgerView = ({
     doc.save(`${selectedParty.replace(/\s+/g, '_')}_Ledger.pdf`);
   };
 
-  const shareToWhatsApp = async () => {
-    if (!selectedParty || partyLedger.length === 0) return;
 
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    doc.setFontSize(22);
-    doc.setTextColor(37, 99, 235);
-    doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
-    doc.line(20, 35, pageWidth - 20, 35);
-    doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text(`Party: ${selectedParty.toUpperCase()}`, 20, 45);
-    doc.setFontSize(10);
-    doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
-    doc.text(`Filter: ${showDueOnly ? 'Pending Bills Only' : 'All Transactions'}`, 20, 57);
-
-    const tableData = partyLedger.map(entry => [
-      entry.date,
-      entry.invoiceNo,
-      entry.narration || '-',
-      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
-    ]);
-
-    autoTable(doc, {
-      startY: 65,
-      head: [['Date', 'Invoice No', 'Narration', 'Amount']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: { 3: { halign: 'right' } }
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`TOTAL BALANCE DUE: Rs. ${totals.totalDue.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This is a computer generated statement.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
-
-    const pdfBlob = doc.output('blob');
-    const fileName = `${selectedParty.replace(/\s+/g, '_')}_Ledger.pdf`;
-    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: `Ledger - ${selectedParty}`,
-          text: `Please find attached the ledger for ${selectedParty}. Total Due: Rs. ${totals.totalDue.toLocaleString('en-IN')}`
-        });
-      } catch (err) {
-        console.error('Share failed', err);
-        doc.save(fileName);
-      }
-    } else {
-      doc.save(fileName);
-      alert("Sharing not supported on this browser. File has been downloaded.");
-    }
-  };
 
   // Get unique parties for the dropdown
   const parties = useMemo(() => {
@@ -287,10 +378,10 @@ const LedgerView = ({
       // 1. Party Match
       if (entry.party !== selectedParty) return false;
 
-      // 2. Narration Match
-      if (narrationFilter) {
-        if (!entry.narration?.toLowerCase().includes(narrationFilter.toLowerCase())) return false;
-      }
+
+
+      // 3. Min Overdue Days Match
+      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
 
       // 3. Due Only Match
       if (showDueOnly) {
@@ -303,28 +394,21 @@ const LedgerView = ({
 
       return true;
     });
-  }, [data, selectedParty, narrationFilter, showDueOnly]);
+  }, [data, selectedParty, showDueOnly, minOverdueDays]);
 
   // Calculate Totals
   const totals = useMemo(() => {
-    let totalAmount = 0;
-    let totalDue = 0;
-    let totalPaid = 0;
-
-    partyLedger.forEach(entry => {
-      totalAmount += (entry.amount || 0);
-
+    return partyLedger.reduce((acc, entry) => {
+      const amount = entry.amount || 0;
       const status = (entry.narration || '').toLowerCase();
       const isSettled = status.includes('received') || status.includes('cancel') || status.includes('delete');
 
-      if (!isSettled) {
-        totalDue += (entry.amount || 0);
-      } else {
-        totalPaid += (entry.amount || 0); // Assuming received amounts are strictly payments (simplification)
-        // Ideally "Paid" might be explicit. For now, we just sum up the list.
-      }
-    });
-    return { totalAmount, totalDue, totalPaid };
+      return {
+        totalAmount: acc.totalAmount + amount,
+        totalDue: acc.totalDue + (isSettled ? 0 : amount),
+        totalPaid: acc.totalPaid + (isSettled ? amount : 0)
+      };
+    }, { totalAmount: 0, totalDue: 0, totalPaid: 0 });
   }, [partyLedger]);
 
   return (
@@ -336,65 +420,69 @@ const LedgerView = ({
         <div className="flex justify-between items-end gap-2">
           <div className="flex-1">
             <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Select Party</label>
-            <input
-              list="parties"
-              placeholder="Type Party Name..."
+            <select
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-800 outline-none focus:ring-2 focus:ring-primary-500"
               value={selectedParty}
               onChange={(e) => setSelectedParty(e.target.value)}
-            />
-            <datalist id="parties">
-              {parties.map(p => <option key={p} value={p} />)}
-            </datalist>
+            >
+              <option value="">Choose a Party...</option>
+              {parties.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
           </div>
+
           {selectedParty && partyLedger.length > 0 && (
-            <div className="flex gap-2">
-              <button
-                onClick={shareToWhatsApp}
-                className="bg-[#25D366] text-white p-3 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
-                title="Share to WhatsApp"
-              >
-                <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
-                  <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+            <div className="flex flex-col gap-2 animate-in slide-in-from-top-2">
+              <div className="flex gap-2 items-stretch">
+                {/* Compact Total Balance Card */}
+                <div className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center">
+                  <div>
+                    <p className="text-[8px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Total Due</p>
+                    <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+                      ₹{totals.totalDue.toLocaleString('en-IN')}
+                    </p>
+                  </div>
+                  <div className="text-right pl-4 border-l border-gray-700">
+                    <p className="text-xl font-black leading-none">{partyLedger.length}</p>
+                    <p className="text-[8px] font-bold text-gray-500 uppercase">Bills</p>
+                  </div>
                 </div>
-              </button>
-              <button
-                onClick={exportToPDF}
-                className="bg-primary-600 text-white p-3 rounded-xl shadow-lg shadow-primary-200 active:scale-90 transition-all flex items-center justify-center"
-                title="Download PDF"
-              >
-                <FileDown size={20} />
-              </button>
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => generateAndSharePDF(partyLedger, `Ledger_${selectedParty}`, `Full Statement`, "TOTAL DUE")}
+                    className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+                    title="Share to WhatsApp"
+                  >
+                    <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                      <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={exportToPDF}
+                    className="bg-primary-600 text-white px-4 rounded-xl shadow-lg shadow-primary-200 active:scale-90 transition-all flex items-center justify-center"
+                    title="Download PDF"
+                  >
+                    <FileDown size={20} />
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
         {selectedParty && (
           <div className="flex gap-4 items-center">
-            {/* Due Only Toggle */}
+            {/* Due Only Toggle - Simplified */}
             <button
               onClick={() => setShowDueOnly(!showDueOnly)}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed transition-all active:scale-95 ${showDueOnly
-                ? 'bg-red-50 border-red-200 text-red-600'
-                : 'bg-white border-gray-300 text-gray-400'
-                }`}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-gray-300 transition-all active:scale-95 bg-white text-gray-400"
             >
               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${showDueOnly ? 'border-red-500 bg-red-500' : 'border-gray-300'}`}>
                 {showDueOnly && <Check size={10} className="text-white" />}
               </div>
-              <span className="text-xs font-bold uppercase">Show Dues Only</span>
+              <span className="text-xs font-bold uppercase whitespace-nowrap">Show Dues Only</span>
             </button>
-
-            {/* Narration Filter */}
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Filter Narration..."
-                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-primary-500"
-                value={narrationFilter}
-                onChange={(e) => setNarrationFilter(e.target.value)}
-              />
-            </div>
           </div>
         )}
       </div>
@@ -412,100 +500,129 @@ const LedgerView = ({
           </div>
         ) : (
           partyLedger.map((entry, idx) => (
-            <div key={idx} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3">
-              {/* Date */}
-              <div className="flex flex-col items-center justify-center bg-gray-50 rounded-xl px-2 py-1 min-w-[50px]">
-                <span className="text-[10px] font-bold text-gray-400 uppercase">{format(parse(entry.date.replace(/-/g, '/').replace(/\./g, '/'), 'dd/MM/yyyy', new Date()), 'MMM')}</span>
-                <span className="text-lg font-black text-gray-800">{format(parse(entry.date.replace(/-/g, '/').replace(/\./g, '/'), 'dd/MM/yyyy', new Date()), 'dd')}</span>
-                <span className="text-[10px] font-bold text-gray-300">{format(parse(entry.date.replace(/-/g, '/').replace(/\./g, '/'), 'dd/MM/yyyy', new Date()), 'yy')}</span>
-              </div>
-
-              {/* Main Details */}
-              <div className="flex-1">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Invoice: {entry.invoiceNo}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-black text-gray-800">₹{(entry.amount || 0).toLocaleString('en-IN')}</span>
-                      {/* Status Badge */}
-                      {entry.narration && (
-                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${entry.narration.toLowerCase().includes('received') ? 'bg-green-100 text-green-700' :
-                          entry.narration.toLowerCase().includes('cancel') ? 'bg-red-100 text-red-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                          {entry.narration}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Interaction Buttons */}
-                  <div className="flex gap-2">
-                    {entry.mobileNo ? (
-                      <>
-                        <a
-                          href={`tel:${entry.mobileNo}`}
-                          className="w-8 h-8 flex items-center justify-center text-white bg-green-500 rounded-full shadow-sm active:scale-90"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Phone size={14} className="fill-current" />
-                        </a>
-                        <a
-                          href={`https://wa.me/91${entry.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                            `Hello ${entry.party}, your payment of ₹${(entry.amount || 0).toLocaleString('en-IN')} for Bill ${entry.invoiceNo} dated ${entry.date} is pending. Please clear it. - Kothari Brothers`
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-8 h-8 flex items-center justify-center text-white bg-[#25D366] rounded-full shadow-sm active:scale-90"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
-                            <span className="text-[10px] font-bold text-[#25D366]">W</span>
-                          </div>
-                        </a>
-                      </>
-                    ) : (
-                      <div className="w-8 h-8 flex items-center justify-center text-gray-300 bg-gray-50 rounded-full border border-gray-100 opacity-50">
-                        <Phone size={12} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CompactCard
+              key={idx}
+              entry={entry}
+              onPartyClick={setSelectedParty}
+            />
           ))
         )}
       </div>
 
-      {/* Floating Summary Footer */}
-      {selectedParty && partyLedger.length > 0 && (
-        <div className="absolute bottom-20 left-4 right-4 bg-gray-900 text-white p-4 rounded-2xl shadow-xl flex justify-between items-center z-20">
-          <div>
-            <p className="text-[10px] text-gray-400 font-bold uppercase">Total Balance</p>
-            <p className="text-xl font-black text-white">₹{totals.totalDue.toLocaleString('en-IN')}</p>
+
+    </div >
+  );
+};
+
+// Ageing View Component
+const AgeingView = ({
+  data,
+  selectedGroup,
+  minOverdueDays,
+  onPartyClick
+}: {
+  data: LedgerEntry[],
+  selectedGroup: string,
+  minOverdueDays: number,
+  onPartyClick: (party: string) => void
+}) => {
+  const filteredData = useMemo(() => {
+    return data.filter(entry => {
+      // 0. Min Filter
+      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
+
+      // 1. Must be strictly DUE (not settled)
+      const status = (entry.narration || '').toLowerCase();
+      const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
+      if (isSettled) return false;
+
+      // 2. Match Age Group
+      const d = entry.dueDays;
+      if (selectedGroup === '0-30 Days') return d <= 30;
+      if (selectedGroup === '31-60 Days') return d > 30 && d <= 60;
+      if (selectedGroup === '61-90 Days') return d > 60 && d <= 90;
+      if (selectedGroup === '91+ Days') return d > 90;
+      return false;
+    });
+  }, [data, selectedGroup, minOverdueDays]);
+
+  // Totals
+  const totalAmount = useMemo(() => filteredData.reduce((acc, curr) => acc + (curr.amount || 0), 0), [filteredData]);
+
+  return (
+    <div className="flex flex-col h-full bg-slate-50">
+      {/* Header Card */}
+      <div className="p-4 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-gray-100">
+        <div className="flex items-stretch gap-2 animate-in slide-in-from-top-2">
+          <div className="flex-1 bg-red-600 text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center shadow-red-200">
+            <div>
+              <p className="text-[8px] text-red-100 font-bold uppercase tracking-wider mb-0.5">Overdue: {selectedGroup}</p>
+              <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-red-200 bg-clip-text text-transparent">
+                ₹{totalAmount.toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className="text-right pl-4 border-l border-red-400/30">
+              <p className="text-xl font-black leading-none text-white">{filteredData.length}</p>
+              <p className="text-[8px] font-bold text-red-100 uppercase">Bills</p>
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] text-gray-400 font-bold uppercase">{partyLedger.length} Entries</p>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => generateAndSharePDF(filteredData, `Ageing_${selectedGroup.replace(/\s+/g, '')}`, `Outstanding Bills (${selectedGroup})`, "TOTAL OVERDUE")}
+              className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+              title="Share PDF to WhatsApp"
+            >
+              <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+              </div>
+            </button>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-auto p-4 space-y-3 pb-32">
+        {filteredData.length === 0 ? (
+          <div className="text-center py-20 opacity-50">
+            <Clock size={48} className="mx-auto mb-4 text-gray-300" />
+            <p className="font-bold text-gray-400">No overdue bills in this range</p>
+          </div>
+        ) : (
+          filteredData.map((entry, idx) => (
+            <CompactCard
+              key={idx}
+              entry={entry}
+              onPartyClick={onPartyClick}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 };
 
-// Reports View Component
 const ReportsView = ({
   data,
-  onPartyClick
+  onPartyClick,
+  onNarrationClick,
+  onAgeingClick,
+  minOverdueDays
 }: {
   data: LedgerEntry[],
-  onPartyClick: (party: string) => void
+  onPartyClick: (party: string) => void,
+  onNarrationClick: (narration: string) => void,
+  onAgeingClick: (group: string) => void,
+  minOverdueDays: number
 }) => {
   const pendingData = useMemo(() => data.filter(entry => {
+    // 1. Min Overdue Filter
+    if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
+
     const status = (entry.narration || '').toLowerCase();
     const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
     return !isSettled;
-  }), [data]);
+  }), [data, minOverdueDays]);
 
   const ageingGroups = useMemo(() => {
     const groups = {
@@ -526,7 +643,7 @@ const ReportsView = ({
   const narrationGroups = useMemo(() => {
     const groups: Record<string, number> = {};
     pendingData.forEach(entry => {
-      const nar = entry.narration || 'PENDING';
+      const nar = entry.narration || 'BLANK';
       groups[nar] = (groups[nar] || 0) + entry.amount;
     });
     return Object.entries(groups).sort((a, b) => b[1] - a[1]);
@@ -553,7 +670,11 @@ const ReportsView = ({
         </div>
         <div className="grid grid-cols-2 gap-3">
           {Object.entries(ageingGroups).map(([label, amount]) => (
-            <div key={label} className="glass p-4 rounded-2xl border-l-4 border-primary-400">
+            <div
+              key={label}
+              onClick={() => onAgeingClick(label)}
+              className="glass p-4 rounded-2xl border-l-4 border-primary-400 active:scale-95 transition-transform cursor-pointer hover:bg-primary-50"
+            >
               <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">{label}</p>
               <p className="text-lg font-black text-gray-900">₹{(amount / 1000).toFixed(1)}K</p>
             </div>
@@ -561,91 +682,80 @@ const ReportsView = ({
         </div>
       </section>
 
-      {/* Narration-wise Pending */}
-      <section>
-        <div className="flex items-center mb-4">
-          <FileText className="text-primary-600 mr-2" size={20} />
-          <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider">Narration-wise Pending</h2>
-        </div>
-        <div className="glass rounded-2xl overflow-hidden border border-gray-100">
-          {narrationGroups.map(([narration, amount]) => (
-            <div key={narration} className={`flex justify-between items-center p-4 border-b border-gray-50 last:border-0`}>
-              <div>
-                <span className="text-xs font-bold text-blue-600 uppercase tracking-tighter bg-blue-50 px-2 py-0.5 rounded-full">{narration}</span>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Narration-wise Pending */}
+        <section>
+          <div className="flex items-center mb-4">
+            <FileText className="text-primary-600 mr-2" size={20} />
+            <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider">Narration-wise Pending</h2>
+          </div>
+          <div className="glass rounded-2xl overflow-hidden border border-gray-100">
+            {narrationGroups.map(([narration, amount]) => (
+              <div
+                key={narration}
+                onClick={() => onNarrationClick(narration)}
+                className="flex justify-between items-center p-4 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 transition-colors active:scale-[0.99]"
+              >
+                <div>
+                  <span className="text-xs font-bold text-blue-600 uppercase tracking-tighter bg-blue-50 px-2 py-0.5 rounded-full">{narration}</span>
+                </div>
+                <p className="font-bold text-gray-800">₹{(amount || 0).toLocaleString('en-IN')}</p>
               </div>
-              <p className="font-bold text-gray-800">₹{(amount || 0).toLocaleString('en-IN')}</p>
-            </div>
-          ))}
-          {narrationGroups.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No pending narration data</div>}
-        </div>
-      </section>
+            ))}
+            {narrationGroups.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No pending narration data</div>}
+          </div>
+        </section>
 
-      {/* Party-wise Pending Bills */}
-      <section>
-        <div className="flex items-center mb-4">
-          <Users className="text-primary-600 mr-2" size={20} />
-          <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider">Party-wise Summary</h2>
-        </div>
-        <div className="space-y-3">
-          {partyGroups.slice(0, 50).map(([party, stats]) => (
-            <div
-              key={party}
-              onClick={() => onPartyClick(party)}
-              className="glass p-4 rounded-2xl border border-gray-100 flex justify-between items-center active:scale-[0.98] cursor-pointer hover:border-primary-200 transition-all"
-            >
-              <div className="flex-1 min-w-0 mr-4">
-                <h3 className="font-bold text-gray-800 text-sm truncate">{party}</h3>
-                <p className="text-[10px] font-medium text-gray-400 uppercase">{stats.bills} Pending Bills</p>
-              </div>
-              <div className="flex flex-col items-end gap-1">
-                <p className="font-black text-primary-700">₹{(stats.amount || 0).toLocaleString('en-IN')}</p>
+        {/* Party-wise Pending Bills */}
+        <section>
+          <div className="flex items-center mb-4">
+            <Users className="text-primary-600 mr-2" size={20} />
+            <h2 className="text-sm font-black text-gray-800 uppercase tracking-wider">Party-wise Summary</h2>
+          </div>
+          <div className="space-y-3">
+            {partyGroups.slice(0, 50).map(([party, stats]) => (
+              <div
+                key={party}
+                onClick={() => onPartyClick(party)}
+                className="glass p-4 rounded-2xl border border-gray-100 flex justify-between items-center active:scale-[0.98] cursor-pointer hover:border-primary-200 transition-all"
+              >
+                <div className="flex-1 min-w-0 mr-4">
+                  <h3 className="font-bold text-gray-800 text-sm truncate">{party}</h3>
+                  <p className="text-[10px] font-medium text-gray-400 uppercase">{stats.bills} Pending Bills</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <p className="font-black text-primary-700">₹{(stats.amount || 0).toLocaleString('en-IN')}</p>
 
-                {/* Interaction Row in Report */}
-                <div className="flex gap-2">
-                  {stats.mobileNo ? (
-                    <>
-                      <a
-                        href={`tel:${stats.mobileNo}`}
-                        className="w-7 h-7 flex items-center justify-center text-white bg-green-500 rounded-full active:scale-90 transition-all"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Phone size={12} className="fill-current" />
-                      </a>
-                      <a
-                        href={`https://wa.me/91${stats.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                          `Hello ${party}, your total outstanding balance with Kothari Brothers is ₹${(stats.amount || 0).toLocaleString('en-IN')} across ${stats.bills} bills. Please clear it at the earliest.`
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-7 h-7 flex items-center justify-center text-white bg-[#25D366] rounded-full active:scale-90 transition-all"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="w-3.5 h-3.5 bg-white rounded-full flex items-center justify-center">
-                          <span className="text-[8px] font-bold text-[#25D366]">W</span>
-                        </div>
-                      </a>
-                    </>
-                  ) : null}
                 </div>
               </div>
-            </div>
-          ))}
-          {partyGroups.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No pending party data</div>}
-        </div>
-      </section>
+            ))}
+            {partyGroups.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No pending party data</div>}
+          </div>
+        </section>
+      </div>
     </div>
   );
 };
 
-const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
-  const [selectedNarration, setSelectedNarration] = useState<string>('');
+const NarrationView = ({
+  data,
+  selectedNarration,
+  setSelectedNarration,
+  minOverdueDays,
+  onPartyClick
+}: {
+  data: LedgerEntry[],
+  selectedNarration: string,
+  setSelectedNarration: (val: string) => void,
+  minOverdueDays: number,
+  onPartyClick: (party: string) => void
+}) => {
 
   // Get unique narrations, excluding payment/settled ones
   const narrations = useMemo(() => {
     const relevant = data
-      .map(e => (e.narration || '').trim())
+      .map(e => (e.narration || 'BLANK').trim())
       .filter(n => {
-        if (!n) return false;
         const low = n.toLowerCase();
         // Skip common settled status narrations for the selector
         return !low.includes('received') && !low.includes('cancel') && !low.includes('delete') && !low.includes('credit note');
@@ -658,8 +768,11 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
     if (!selectedNarration) return [];
 
     return data.filter(entry => {
+      // 0. Min Overdue Filter
+      if (minOverdueDays > 0 && entry.dueDays < minOverdueDays) return false;
+
       // 1. Narration Match (exact or closely matching)
-      if (entry.narration !== selectedNarration) return false;
+      if ((entry.narration || 'BLANK') !== selectedNarration) return false;
 
       // 2. ONLY DUES (unpaid)
       const status = (entry.narration || '').toLowerCase();
@@ -667,7 +780,7 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
 
       return !isSettled;
     });
-  }, [data, selectedNarration]);
+  }, [data, selectedNarration, minOverdueDays]);
 
   // Calculate Totals
   const totals = useMemo(() => {
@@ -722,7 +835,7 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
       columnStyles: { 3: { halign: 'right' } }
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    const finalY = (doc as jsPDFWithAutoTable).lastAutoTable.finalY + 10;
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`TOTAL PENDING: Rs. ${totals.totalAmount.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
@@ -734,93 +847,42 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
     doc.save(`${selectedNarration.replace(/\s+/g, '_')}_Due_Report.pdf`);
   };
 
-  const shareToWhatsApp = async () => {
-    if (!selectedNarration || narrationLedger.length === 0) return;
 
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    doc.setFontSize(22);
-    doc.setTextColor(37, 99, 235);
-    doc.text('KOTHARI BROTHERS', pageWidth / 2, 20, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text('A PHARMACEUTICAL DEALERS', pageWidth / 2, 26, { align: 'center' });
-    doc.line(20, 35, pageWidth - 20, 35);
-    doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text(`Narration Group: ${selectedNarration.toUpperCase()}`, 20, 45);
-    doc.setFontSize(10);
-    doc.text(`Report Date: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 20, 52);
-    doc.text(`Status: Strictly Due Entries Only`, 20, 57);
-
-    const tableData = narrationLedger.map(entry => [
-      entry.date,
-      entry.party,
-      entry.invoiceNo,
-      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
-    ]);
-
-    autoTable(doc, {
-      startY: 65,
-      head: [['Date', 'Party Name', 'Invoice No', 'Amount']],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 8, cellPadding: 2.5 },
-      columnStyles: { 3: { halign: 'right' } }
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`TOTAL PENDING: Rs. ${totals.totalAmount.toLocaleString('en-IN')}`, pageWidth - 20, finalY, { align: 'right' });
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.text('Statement generated for record keeping.', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
-
-    const pdfBlob = doc.output('blob');
-    const fileName = `${selectedNarration.replace(/\s+/g, '_')}_Due_Report.pdf`;
-    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: `Report - ${selectedNarration}`,
-          text: `Please find attached the due report for group: ${selectedNarration}. Total Pending: Rs. ${totals.totalAmount.toLocaleString('en-IN')}`
-        });
-      } catch (err) {
-        console.error('Share failed', err);
-        doc.save(fileName);
-      }
-    } else {
-      doc.save(fileName);
-      alert("Sharing not supported on this browser. File has been downloaded.");
-    }
-  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="p-4 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-gray-100">
         <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Select Narration (Only Dues)</label>
         <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <input
-              list="narrations"
-              placeholder="Search Narration..."
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-800 outline-none focus:ring-2 focus:ring-primary-500"
-              value={selectedNarration}
-              onChange={(e) => setSelectedNarration(e.target.value)}
-            />
-            <datalist id="narrations">
-              {narrations.map(n => <option key={n} value={n} />)}
-            </datalist>
-          </div>
-          {selectedNarration && narrationLedger.length > 0 && (
+          <select
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold text-gray-800 outline-none focus:ring-2 focus:ring-primary-500"
+            value={selectedNarration}
+            onChange={(e) => setSelectedNarration(e.target.value)}
+          >
+            <option value="">Choose a Narration Group...</option>
+            {narrations.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+
+        {selectedNarration && narrationLedger.length > 0 && (
+          <div className="mt-3 flex items-stretch gap-2 animate-in slide-in-from-top-2">
+            <div className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center">
+              <div>
+                <p className="text-[8px] text-indigo-200 font-bold uppercase tracking-wider mb-0.5">Total Pending</p>
+                <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">
+                  ₹{totals.totalAmount.toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="text-right pl-4 border-l border-indigo-400/30">
+                <p className="text-xl font-black leading-none text-white">{narrationLedger.length}</p>
+                <p className="text-[8px] font-bold text-indigo-200 uppercase">Bills</p>
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <button
-                onClick={shareToWhatsApp}
-                className="bg-[#25D366] text-white p-3 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+                onClick={() => generateAndSharePDF(narrationLedger, `Narration_${selectedNarration}`, "Pending Bills in Group", "TOTAL PENDING")}
+                className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
                 title="Share PDF to WhatsApp"
               >
                 <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
@@ -829,13 +891,13 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
               </button>
               <button
                 onClick={exportToPDF}
-                className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg shadow-indigo-200 active:scale-90 transition-all flex items-center justify-center"
+                className="bg-indigo-600 text-white px-4 rounded-xl shadow-lg shadow-indigo-200 active:scale-90 transition-all flex items-center justify-center"
               >
                 <FileDown size={20} />
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-3 pb-32">
@@ -850,99 +912,52 @@ const NarrationView = ({ data }: { data: LedgerEntry[] }) => {
           </div>
         ) : (
           narrationLedger.map((entry, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xs font-black text-primary-600 uppercase tracking-tight">{entry.party}</h3>
-                  <p className="text-[10px] font-bold text-gray-400">Invoice: {entry.invoiceNo} • {entry.date}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-black text-gray-900">₹{(entry.amount || 0).toLocaleString('en-IN')}</p>
-                  <span className="text-[8px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-black uppercase">DUE</span>
-                </div>
-              </div>
-
-              {/* Interaction Row */}
-              <div className="flex justify-between items-center pt-2 border-t border-gray-50">
-                <div className="flex items-center text-[10px] text-gray-400 font-bold uppercase">
-                  <Clock size={10} className="mr-1" />
-                  {entry.dueDays} Days Overdue
-                </div>
-
-                <div className="flex gap-2">
-                  {entry.mobileNo ? (
-                    <>
-                      <a
-                        href={`tel:${entry.mobileNo}`}
-                        className="w-8 h-8 flex items-center justify-center text-white bg-green-500 rounded-full shadow-sm active:scale-90 transition-all"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Phone size={14} className="fill-current" />
-                      </a>
-                      <a
-                        href={`https://wa.me/91${entry.mobileNo.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                          `Hello ${entry.party}, your payment of ₹${(entry.amount || 0).toLocaleString('en-IN')} for Bill ${entry.invoiceNo} dated ${entry.date} is pending. Please clear it. - Kothari Brothers`
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-8 h-8 flex items-center justify-center text-white bg-[#25D366] rounded-full shadow-sm active:scale-90 transition-all"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
-                          <span className="text-[10px] font-bold text-[#25D366]">W</span>
-                        </div>
-                      </a>
-                    </>
-                  ) : (
-                    <span className="text-[10px] font-bold text-gray-300 italic">No Number</span>
-                  )}
-                </div>
-              </div>
-            </div>
+            <CompactCard
+              key={idx}
+              entry={entry}
+              onPartyClick={onPartyClick}
+            />
           ))
         )}
       </div>
 
-      {selectedNarration && narrationLedger.length > 0 && (
-        <div className="absolute bottom-20 left-4 right-4 animate-in slide-in-from-bottom-4">
-          <div className="bg-indigo-600 text-white p-4 rounded-2xl shadow-xl flex justify-between items-center">
-            <div>
-              <p className="text-[10px] text-indigo-200 font-bold uppercase">Total Pending Amount</p>
-              <p className="text-xl font-black">₹{totals.totalAmount.toLocaleString('en-IN')}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[12px] font-black">{narrationLedger.length} Bills</p>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 };
 
 const DEFAULT_YEAR: FinancialYear = '25-26';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<FinancialYear>(DEFAULT_YEAR);
   const [selectedParty, setSelectedParty] = useState<string>('');
+  const [selectedNarration, setSelectedNarration] = useState<string>('');
+  const [selectedAgeingGroup, setSelectedAgeingGroup] = useState<string>('');
 
   // DEFER LOADING: Initialize empty to allow first paint
   const [data, setData] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
+  const [, setRefreshing] = useState(false);
   const [pendingOnly, setPendingOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration' | 'ageing' | 'settings'>('dashboard');
 
-  const [lastUpdated, setLastUpdated] = useState<string | null>(() => {
+  const [, setLastUpdated] = useState<string | null>(() => {
     return localStorage.getItem(`cachedTime_${DEFAULT_YEAR}`);
   });
 
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [updatingInvoice, setUpdatingInvoice] = useState<string | undefined>(undefined);
-  const [pingResult, setPingResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'fail', message?: string }>({ status: 'idle' });
+  const [viewMode, setViewMode] = useState<'card' | 'table'>(() => {
+    return (localStorage.getItem('preferredViewMode') as 'card' | 'table') || 'card';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('preferredViewMode', viewMode);
+  }, [viewMode]);
+
 
   // Quick Status Update Handler
   const handleUpdateStatus = async (invoiceNo: string, currentStatus: string) => {
@@ -971,9 +986,9 @@ const App: React.FC = () => {
     setUpdatingInvoice(undefined);
   };
 
-  // Date Filters
+  // --- FILTER COMMANDS (States) ---
   const [showFilters, setShowFilters] = useState(false);
-  const [filterMonth, setFilterMonth] = useState<string>(''); // 'MM-yyyy'
+  const [filterMonth, setFilterMonth] = useState<string>('');
   const [dateRange, setDateRange] = useState<{ start: string, end: string }>({ start: '', end: '' });
 
   const availableMonths = useMemo(() => {
@@ -983,60 +998,41 @@ const App: React.FC = () => {
       const my = data[i].monthYear;
       if (my) months.add(my);
     }
-    // Sort reverse chronological
     return Array.from(months).sort((a, b) => {
       try {
         const db = parse(b, 'MMMM yyyy', new Date());
         const da = parse(a, 'MMMM yyyy', new Date());
         return db.getTime() - da.getTime();
-      } catch (e) { return 0; }
+      } catch { return 0; }
     });
   }, [data]);
 
-  // Clear stale caches on version bump
-  useEffect(() => {
-    const currentV = localStorage.getItem('app_cache_version');
-    if (currentV !== CACHE_VERSION) {
-      console.log("Cache version mismatch. Clearing old data...");
-      Object.keys(localStorage).forEach(key => {
-        if (key.includes('cachedLedgerData')) localStorage.removeItem(key);
-      });
-      localStorage.setItem('app_cache_version', CACHE_VERSION);
-    }
 
-    // Initial Cache Load - Using IndexedDB for speed and to prevent thread blocking
-    const initLoad = async () => {
-      try {
-        const cached = await get(`cachedLedgerData_${selectedYear}`);
-        if (cached && Array.isArray(cached) && cached.length > 0) {
-          setData(cached);
-          setLoading(false);
-          setLastUpdated(localStorage.getItem(`cachedTime_${selectedYear}`));
-        } else {
-          // If no cache at all, trigger network sync
-          loadData(selectedYear, true);
-        }
-      } catch (e) {
-        console.error("Initial cache load failed", e);
-        loadData(selectedYear, true);
-      }
-    };
 
-    initLoad();
-  }, []);
 
-  const loadData = async (year: FinancialYear = selectedYear, forceRefresh = false) => {
+  const loadData = useCallback(async (year: FinancialYear = selectedYear, forceRefresh = false) => {
     try {
       // 1. Check Cache first (IndexedDB is async and doesn't block)
       const cachedData = await get(`cachedLedgerData_${year}`);
       const cachedTime = localStorage.getItem(`cachedTime_${year}`);
 
       if (cachedData && !forceRefresh) {
-        setData(cachedData);
-        setLastUpdated(cachedTime);
-        setLoading(false);
-        setRefreshing(false);
-        return;
+        // Check if cache is stale (older than 5 minutes)
+        const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+        const cacheAge = cachedTime ? Date.now() - new Date(cachedTime).getTime() : Infinity;
+
+        if (cacheAge > CACHE_MAX_AGE_MS) {
+          console.log(`[CACHE] Data is ${Math.round(cacheAge / 60000)} minutes old. Refreshing...`);
+          // Cache is stale, force refresh
+          forceRefresh = true;
+        } else {
+          // Cache is fresh, use it
+          setData(cachedData);
+          setLastUpdated(cachedTime);
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
       }
 
       // 2. Start Sync UI
@@ -1063,9 +1059,10 @@ const App: React.FC = () => {
         ledgerData = await fetchLedgerData(year, forceRefresh);
       }
 
-      console.log(`Fetch took ${(performance.now() - startTime).toFixed(2)}ms for ${ledgerData.length} rows`);
+      console.log(`[LOAD] Fetch took ${(performance.now() - startTime).toFixed(2)}ms for ${ledgerData.length} rows`);
 
       // 4. Update State & UI
+      console.log('[LOAD] Setting data state with', ledgerData.length, 'records');
       setData(ledgerData);
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastUpdated(now);
@@ -1087,12 +1084,50 @@ const App: React.FC = () => {
       setRefreshing(false);
       setLoadingProgress('');
     }
-  };
-
-  useEffect(() => {
-    loadData(selectedYear);
-    document.title = "KOTHARI BROTHERS";
   }, [selectedYear]);
+
+  // Consolidated Initial Load & Version Management
+  useEffect(() => {
+    const manageCacheAndLoad = async () => {
+      const currentV = localStorage.getItem('app_cache_version');
+      if (currentV !== CACHE_VERSION) {
+        console.log("Cache version mismatch. Clearing IndexedDB...");
+        try {
+          const years = ['25-26', '24-25', '23-24', '22-23']; // YEAR_GIDS keys
+          for (const y of years) {
+            await set(`cachedLedgerData_${y}`, null);
+            localStorage.removeItem(`cachedTime_${y}`);
+          }
+        } catch (e) {
+          console.error("Failed to clear IDB cache", e);
+        }
+        localStorage.setItem('app_cache_version', CACHE_VERSION);
+      }
+
+      // Initial Load
+      try {
+        console.log('[INIT] Loading year:', selectedYear);
+        const cached = await get(`cachedLedgerData_${selectedYear}`);
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          setData(cached);
+          setLoading(false);
+          setLastUpdated(localStorage.getItem(`cachedTime_${selectedYear}`));
+          // Background sync to ensure data is fresh
+          loadData(selectedYear, false);
+        } else {
+          loadData(selectedYear, true);
+        }
+      } catch (e) {
+        console.error("[INIT] Load failed", e);
+        loadData(selectedYear, true);
+      }
+    };
+
+    manageCacheAndLoad();
+    document.title = "KOTHARI BROTHERS";
+  }, [selectedYear, loadData]);
+
+  const [minOverdueDays, setMinOverdueDays] = useState<number>(0);
 
   const deferredSearch = useDeferredValue(searchQuery);
 
@@ -1100,31 +1135,7 @@ const App: React.FC = () => {
     const searchWords = deferredSearch.toLowerCase().split(/[^a-z0-9]/).filter(w => w.length > 0);
     const hasSearch = searchWords.length > 0;
 
-    // Pre-calculate date filter bounds
-    // SAFELY handle date parsing to prevent crashes
-    let startBound: number | null = null;
-    let endBoundTime: number | null = null;
-
-    try {
-      if (dateRange.start) {
-        const s = new Date(dateRange.start);
-        if (!isNaN(s.getTime())) {
-          s.setHours(0, 0, 0, 0);
-          startBound = s.getTime();
-        }
-      }
-
-      if (dateRange.end) {
-        const e = new Date(dateRange.end);
-        if (!isNaN(e.getTime())) {
-          e.setHours(23, 59, 59, 999);
-          endBoundTime = e.getTime();
-        }
-      }
-    } catch (e) {
-      console.error("Date filter processing error", e);
-    }
-
+    // Simplified filtering result container
     const results: LedgerEntry[] = [];
     let totOutstanding = 0;
     let ovrCount = 0;
@@ -1134,11 +1145,17 @@ const App: React.FC = () => {
     for (let i = 0; i < len; i++) {
       const entry = data[i];
 
+      // 0. OVERDUE THRESHOLD FILTER (New)
+      if (minOverdueDays > 0) {
+        if (entry.dueDays < minOverdueDays) continue;
+      }
+
       // 1. SEARCH FILTER
       if (hasSearch) {
         let matchesAll = true;
+        const searchStr = entry.searchString || '';
         for (let j = 0; j < searchWords.length; j++) {
-          if (!entry.searchString.includes(searchWords[j])) {
+          if (!searchStr.includes(searchWords[j])) {
             matchesAll = false;
             break;
           }
@@ -1146,19 +1163,40 @@ const App: React.FC = () => {
         if (!matchesAll) continue;
       }
 
-      // 2. DATE FILTER
-      if (showFilters) {
-        if (filterMonth && entry.monthYear !== filterMonth) continue;
-        if (startBound !== null && entry.timestamp < startBound) continue;
-        if (endBoundTime !== null && entry.timestamp > endBoundTime) continue;
-      }
+      // 2. [DATE_FILTER_FUNCTION]
+      const applyDateFilter = () => {
+        if (filterMonth && entry.monthYear !== filterMonth) return false;
 
-      // 3. STATUS LOGIC (Calculated once per loop)
+        let startBound: number | null = null;
+        let endBound: number | null = null;
+
+        if (dateRange.start) {
+          const p = dateRange.start.split('-');
+          startBound = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2])).setHours(0, 0, 0, 0);
+        }
+        if (dateRange.end) {
+          const p = dateRange.end.split('-');
+          endBound = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2])).setHours(23, 59, 59, 999);
+        }
+
+        const ts = entry.timestamp || 0;
+        if (startBound && (ts === 0 || ts < startBound)) return false;
+        if (endBound && (ts === 0 || ts > endBound)) return false;
+
+        return true;
+      };
+      if (!applyDateFilter()) continue;
+
+      // 3. STATUS LOGIC
       const status = (entry.narration || '').toLowerCase();
       const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
 
-      // 4. PENDING ONLY FILTER
-      if (pendingOnly && isSettled) continue;
+      // 4. [PENDING_FILTER_FUNCTION]
+      const applyPendingFilter = () => {
+        if (pendingOnly && isSettled) return false;
+        return true;
+      };
+      if (!applyPendingFilter()) continue;
 
       // MATCH!
       results.push(entry);
@@ -1176,9 +1214,11 @@ const App: React.FC = () => {
       filteredData: results,
       metrics: { totalOutstanding: totOutstanding, overdueCount: ovrCount }
     };
-  }, [data, deferredSearch, pendingOnly, showFilters, filterMonth, dateRange]);
+  }, [data, deferredSearch, pendingOnly, showFilters, filterMonth, dateRange, minOverdueDays]);
 
   const { totalOutstanding, overdueCount } = metrics;
+
+
 
   if (loading) {
     return (
@@ -1204,12 +1244,24 @@ const App: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
-                <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 animate-pulse">DIAGNOSTICS v9</span>
+                <div className="flex gap-1 items-center">
+                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">v11</span>
+                  <span className="bg-slate-100 text-slate-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-slate-200">RAW: {data.length}</span>
+                </div>
               </div>
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] mt-0.5 whitespace-nowrap">A PHARMACEUTICAL DEALERS</p>
             </div>
           </div>
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => loadData(selectedYear, true)}
+              disabled={loading}
+              className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 p-2 rounded-lg shadow-sm transition-all active:scale-90 disabled:opacity-50 flex items-center gap-2"
+              title="Force Sync from Google Sheet"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin text-primary-600' : ''} />
+              <span className="text-[10px] font-bold uppercase hidden sm:inline">Sync</span>
+            </button>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value as FinancialYear)}
@@ -1218,66 +1270,60 @@ const App: React.FC = () => {
               {Object.keys(YEAR_GIDS).map(year => (
                 <option key={year} value={year}>FY {year}</option>
               ))}
+              <option value="ALL_TIME">All Years</option>
             </select>
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => {
-                    if (window.confirm("This will clear all cache and reload the app to the latest version. Proceed?")) {
-                      if ('serviceWorker' in navigator) {
-                        navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
-                      }
-                      caches.keys().then(names => names.forEach(n => caches.delete(n)));
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="bg-red-500 text-white text-[8px] font-black px-2 py-1 rounded-lg shadow-sm active:scale-95"
-                >
-                  HARD RESET
-                </button>
-                <button
-                  onClick={() => loadData(selectedYear, true)}
-                  className={`p-2 rounded-full hover:bg-gray-100 transition-colors ${refreshing ? 'animate-spin' : ''}`}
-                >
-                  <RefreshCcw size={20} className="text-gray-600" />
-                </button>
-              </div>
-              {lastUpdated && !refreshing && (
-                <span className="text-[8px] font-bold text-gray-400 uppercase">Synced {lastUpdated}</span>
-              )}
-              {refreshing && (
-                <span className="text-[8px] font-bold text-primary-500 uppercase animate-pulse">
-                  {loadingProgress || 'Syncing...'}
-                </span>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* Search & Filters */}
+        {/* Dashboard Actions Bar */}
         <div className="flex gap-2">
-          <div className="relative group flex-1">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search size={18} className="text-gray-400 group-focus-within:text-primary-500 transition-colors" />
+          {activeTab === 'dashboard' && (
+            <div className="relative group flex-1">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search size={18} className="text-gray-400 group-focus-within:text-primary-500 transition-colors" />
+              </div>
+              <input
+                type="text"
+                className="w-full pl-10 pr-4 py-3 bg-white/50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all shadow-sm group-hover:shadow-md text-gray-900 placeholder-gray-400"
+                placeholder="Search Party, Bill No, Mobile..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
-            <input
-              type="text"
-              className="w-full pl-10 pr-4 py-3 bg-white/50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all shadow-sm group-hover:shadow-md text-gray-900 placeholder-gray-400"
-              placeholder="Search Party, Bill No, Mobile..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+          )}
+
+          <div className="relative">
+            <select
+              value={minOverdueDays}
+              onChange={(e) => setMinOverdueDays(Number(e.target.value))}
+              className={`h-full pl-3 pr-8 rounded-2xl border appearance-none font-bold text-sm outline-none transition-all ${minOverdueDays > 0
+                ? 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-200'
+                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              style={{ backgroundImage: 'none' }}
+            >
+              <option value="0">All</option>
+              <option value="30">30+</option>
+              <option value="45">45+</option>
+              <option value="60">60+</option>
+              <option value="90">90+</option>
+              <option value="120">120+</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2">
+              <Clock size={14} className={minOverdueDays > 0 ? "text-white" : "text-gray-400"} />
+            </div>
           </div>
+
           <button
             onClick={() => setPendingOnly(!pendingOnly)}
             className={`px-4 rounded-2xl border transition-all flex items-center gap-2 font-bold text-sm ${pendingOnly
-              ? 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-200'
+              ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-200'
               : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}
+            title="FILTER PENDING ITEMS"
           >
             <Clock size={18} />
-            <span className="hidden sm:inline">{pendingOnly ? 'Pending' : 'All'}</span>
+            <span className="hidden sm:inline">{pendingOnly ? 'UNPAID Pending BILL' : 'ALL BILL'}</span>
           </button>
 
           <button
@@ -1286,70 +1332,75 @@ const App: React.FC = () => {
               ? 'bg-primary-500 border-primary-500 text-white shadow-lg shadow-primary-200'
               : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}
+            title="OPEN DATE FILTER"
           >
             <Filter size={18} />
+            <span className="hidden sm:inline">DATE FILTER</span>
           </button>
+
+          <div className="flex bg-white/50 border border-gray-200 rounded-2xl p-1 shadow-sm">
+            <button
+              onClick={() => setViewMode('card')}
+              className={`p-2 rounded-xl transition-all ${viewMode === 'card' ? 'bg-primary-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+              title="Grid View"
+            >
+              <LayoutGrid size={18} />
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-2 rounded-xl transition-all ${viewMode === 'table' ? 'bg-primary-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+              title="Table View"
+            >
+              <ListIcon size={18} />
+            </button>
+          </div>
         </div>
 
-        {/* Date Filters Panel */}
         {showFilters && (
           <div className="mt-3 p-4 glass rounded-2xl border border-gray-100 animate-in slide-in-from-top-2">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
-                <CalendarDays size={16} className="text-primary-600" />
-                Date Filters
+              <h3 className="font-bold text-gray-800 text-xs flex items-center gap-2 uppercase tracking-widest">
+                <Calendar size={16} className="text-primary-600" />
+                Date Range Filter
               </h3>
-              <button onClick={() => {
-                setFilterMonth('');
-                setDateRange({ start: '', end: '' });
-              }} className="text-[10px] font-bold text-red-500 uppercase hover:underline">
-                Clear Filters
+              <button
+                onClick={() => { setFilterMonth(''); setDateRange({ start: '', end: '' }); }}
+                className="text-[10px] font-bold text-red-500 uppercase hover:underline"
+              >
+                Reset Dates
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Month Select */}
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Select Month</label>
+                <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">By Month</label>
                 <select
                   value={filterMonth}
-                  onChange={(e) => {
-                    setFilterMonth(e.target.value);
-                    setDateRange({ start: '', end: '' }); // Clear range if month selected
-                  }}
-                  className="w-full bg-white/50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-primary-500"
+                  onChange={(e) => { setFilterMonth(e.target.value); setDateRange({ start: '', end: '' }); }}
+                  className="w-full bg-white/50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-700 outline-none"
                 >
                   <option value="">All Months</option>
-                  {availableMonths.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
+                  {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
 
-              {/* Date Range */}
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Start Date</label>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">Start</label>
                   <input
                     type="date"
                     value={dateRange.start}
-                    onChange={(e) => {
-                      setDateRange(prev => ({ ...prev, start: e.target.value }));
-                      setFilterMonth(''); // Clear month if range used
-                    }}
-                    className="w-full bg-white/50 border border-gray-200 rounded-xl px-2 py-2 text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-primary-500"
+                    onChange={(e) => { setDateRange(prev => ({ ...prev, start: e.target.value })); setFilterMonth(''); }}
+                    className="w-full bg-white/50 border border-gray-200 rounded-xl px-2 py-2 text-[10px] font-bold text-gray-700 outline-none"
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">End Date</label>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase mb-1">End</label>
                   <input
                     type="date"
                     value={dateRange.end}
-                    onChange={(e) => {
-                      setDateRange(prev => ({ ...prev, end: e.target.value }));
-                      setFilterMonth(''); // Clear month if range used
-                    }}
-                    className="w-full bg-white/50 border border-gray-200 rounded-xl px-2 py-2 text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-primary-500"
+                    onChange={(e) => { setDateRange(prev => ({ ...prev, end: e.target.value })); setFilterMonth(''); }}
+                    className="w-full bg-white/50 border border-gray-200 rounded-xl px-2 py-2 text-[10px] font-bold text-gray-700 outline-none"
                   />
                 </div>
               </div>
@@ -1357,7 +1408,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
             <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
@@ -1366,12 +1416,11 @@ const App: React.FC = () => {
         )}
       </header>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <main className="flex-1 overflow-hidden relative flex flex-col">
         {activeTab === 'dashboard' ? (
           <>
-            {/* Dashboard Summary Cards */}
-            <div className="flex gap-4 p-4 overflow-x-auto no-scrollbar">
+            <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar pb-2">
               <div className="flex-shrink-0 w-40 glass p-4 rounded-2xl border-l-4 border-primary-500 shadow-sm">
                 <p className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-1">Total Due</p>
                 <p className="text-lg font-black text-primary-700">₹{(totalOutstanding / 100000).toFixed(2)}L</p>
@@ -1386,33 +1435,62 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 bg-slate-50 relative overflow-hidden">
-              <AutoSizer
-                renderProp={({ height, width }: { height: number | undefined; width: number | undefined }) => (
-                  <List
-                    style={{ height: height || 0, width: width || 0 }}
-                    rowCount={filteredData.length}
-                    rowHeight={165}
-                    className="no-scrollbar"
-                    rowComponent={Row}
-                    rowProps={{
-                      data: filteredData,
-                      onUpdateStatus: handleUpdateStatus,
-                      updatingInvoice
-                    }}
-                  />
-                )}
-              />
+            <div className={`flex-1 min-h-0 bg-slate-50 relative overflow-hidden flex flex-col ${viewMode === 'table' ? 'rounded-b-2xl border-x border-b border-gray-100' : ''}`}>
+              {viewMode === 'table' && <TableViewHeader />}
+              <div className="flex-1">
+                {/* @ts-ignore */}
+                <AutoSizer
+                  renderProp={({ height, width }: { height: number | undefined; width: number | undefined }) => {
+                    if (!height || !width) return null;
+                    return (
+                      /* @ts-ignore */
+                      <List
+                        key={viewMode}
+                        style={{ height, width }}
+                        rowCount={filteredData.length}
+                        rowHeight={viewMode === 'table' ? 45 : 125}
+                        rowComponent={viewMode === 'table' ? TableRow : Row}
+                        rowProps={{
+                          entries: filteredData,
+                          onUpdateStatus: handleUpdateStatus,
+                          updatingInvoice,
+                          onPartyClick: (party: string) => {
+                            setSelectedParty(party);
+                            setActiveTab('ledger');
+                          }
+                        }}
+                        className="scrollbar-thin scrollbar-thumb-gray-200"
+                      />
+                    );
+                  }}
+                />
+              </div>
             </div>
 
             {filteredData.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center p-8">
+                <div className="text-center p-8 bg-white/50 backdrop-blur-sm rounded-3xl border border-gray-100 shadow-xl">
                   <div className="bg-gray-100 p-6 rounded-full inline-block mb-4">
                     <Filter size={48} className="text-gray-300" />
                   </div>
                   <h3 className="text-lg font-bold text-gray-900">No results found</h3>
-                  <p className="text-gray-500">Try changing your search keywords</p>
+                  <div className="text-gray-500 text-sm space-y-1 mt-2">
+                    {searchQuery && <p>Search: "<span className="font-bold">{searchQuery}</span>"</p>}
+                    {pendingOnly && <p className="text-amber-600 font-bold uppercase text-[10px]">Filter: UNPAID Pending BILL ONLY</p>}
+                    {(filterMonth || dateRange.start || dateRange.end) && <p className="text-primary-600 font-bold uppercase text-[10px]">Filter: DATE RANGE ACTIVE</p>}
+                    <p className="mt-4 text-[10px] text-gray-400">Current Year: <span className="font-black">FY {selectedYear}</span></p>
+                    <button
+                      onClick={() => {
+                        setSearchQuery('');
+                        setPendingOnly(false);
+                        setFilterMonth('');
+                        setDateRange({ start: '', end: '' });
+                      }}
+                      className="mt-4 pointer-events-auto bg-primary-50 text-primary-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-primary-100"
+                    >
+                      RESET ALL FILTERS
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1424,105 +1502,53 @@ const App: React.FC = () => {
               setSelectedParty(party);
               setActiveTab('ledger');
             }}
+            onNarrationClick={(narration) => {
+              setSelectedNarration(narration);
+              setActiveTab('narration');
+            }}
+            onAgeingClick={(group) => {
+              setSelectedAgeingGroup(group);
+              setActiveTab('ageing');
+            }}
+            minOverdueDays={minOverdueDays}
           />
         ) : activeTab === 'ledger' ? (
           <LedgerView
             data={data}
             selectedParty={selectedParty}
             setSelectedParty={setSelectedParty}
+            minOverdueDays={minOverdueDays}
           />
         ) : activeTab === 'narration' ? (
-          <NarrationView data={data} />
-        ) : activeTab === 'settings' ? (
-          <div className="p-4 space-y-6 overflow-auto pb-32">
-            <div className="glass p-6 rounded-3xl border-2 border-primary-100">
-              <h2 className="text-lg font-black text-gray-900 mb-2 flex items-center gap-2">
-                <RefreshCcw size={20} className="text-primary-600" />
-                CONNECTION TESTER
-              </h2>
-              <p className="text-xs text-gray-500 font-bold mb-4 uppercase tracking-wider">Verify your Google Sheet Sync</p>
-
-              <div className="space-y-4">
-                <button
-                  onClick={async () => {
-                    setPingResult({ status: 'testing' });
-                    const testInv = "TEST-PING";
-                    setUpdatingInvoice(testInv);
-                    try {
-                      const ok = await updateLedgerEntry(testInv, "PING-OK", selectedYear);
-                      if (ok) {
-                        setPingResult({
-                          status: 'success',
-                          message: "Sent! Check for 'TEST-PING' in your sheet. If not found, click 'Browser Test' below."
-                        });
-                      } else {
-                        setPingResult({ status: 'fail', message: "Failed to send. Check your URL or permission settings." });
-                      }
-                    } catch (err) {
-                      setPingResult({ status: 'fail', message: "Error: " + (err as Error).message });
-                    }
-                    setUpdatingInvoice(undefined);
-                  }}
-                  className={`w-full font-black py-4 rounded-2xl shadow-lg transition-all active:scale-95 ${pingResult.status === 'success' ? 'bg-green-600 text-white shadow-green-200' :
-                    pingResult.status === 'fail' ? 'bg-red-600 text-white shadow-red-200' :
-                      'bg-primary-600 text-white shadow-primary-200'
-                    }`}
-                >
-                  {updatingInvoice === "TEST-PING" ? "SENDING PING..." : "TEST CONNECTION"}
-                </button>
-
-                {pingResult.status !== 'idle' && (
-                  <div className={`p-4 rounded-xl border-l-4 ${pingResult.status === 'success' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'
-                    }`}>
-                    <p className={`text-xs font-bold ${pingResult.status === 'success' ? 'text-green-800' : 'text-red-800'}`}>
-                      {pingResult.message}
-                    </p>
-                  </div>
-                )}
-
-                <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200">
-                  <h3 className="text-amber-800 text-[10px] font-black uppercase mb-2 flex items-center gap-1">
-                    <ExternalLink size={12} />
-                    Direct Browser Test
-                  </h3>
-                  <p className="text-[10px] text-amber-700 font-medium mb-3">
-                    If the big button above fails, click below. If you see "Success" in the new tab, your script is perfect!
-                  </p>
-                  <a
-                    href={getTestUrl(selectedYear)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-[10px] font-black shadow-sm shadow-amber-200 active:scale-95"
-                  >
-                    TEST IN BROWSER TAB
-                  </a>
-                </div>
-
-                <p className="text-[10px] text-gray-400 font-medium italic">
-                  Note: A "Sent" result only means the app reached the internet. Only seeing "TEST" in your sheet confirms it's working.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 space-y-3">
-              <h2 className="text-xs font-black text-gray-400 uppercase tracking-widest px-2">App Menu</h2>
-              {['Export Data', 'Help & Support', 'About LedgerPro'].map((item) => (
-                <div key={item} className="glass p-4 rounded-2xl border border-gray-100 flex items-center justify-between active:scale-95 transition-all">
-                  <span className="font-bold text-gray-700">{item}</span>
-                  <ChevronRight size={18} className="text-gray-400" />
-                </div>
-              ))}
-            </div>
-          </div>
+          <NarrationView
+            data={data}
+            selectedNarration={selectedNarration}
+            setSelectedNarration={setSelectedNarration}
+            minOverdueDays={minOverdueDays}
+            onPartyClick={(party) => {
+              setSelectedParty(party);
+              setActiveTab('ledger');
+            }}
+          />
+        ) : activeTab === 'ageing' ? (
+          <AgeingView
+            data={data}
+            selectedGroup={selectedAgeingGroup}
+            minOverdueDays={minOverdueDays}
+            onPartyClick={(party) => {
+              setSelectedParty(party);
+              setActiveTab('ledger');
+            }}
+          />
         ) : (
-          <div className="p-4 flex items-center justify-center h-full">
-            <button onClick={() => setActiveTab('settings')} className="bg-primary-50 text-primary-600 px-6 py-3 rounded-2xl font-black">OPEN SETTINGS</button>
+          <div className="p-4 flex items-center justify-center h-full text-gray-400 font-bold">
+            Select a tab to view content
           </div>
         )}
       </main>
 
       {/* Navigation - Bottom bar for mobile */}
-      <nav className="glass border-t border-gray-200 px-2 py-2 pb-6 flex justify-around items-center">
+      <nav className="glass border-t border-gray-200 px-2 py-2 pb-6 flex justify-around items-center flex-shrink-0">
         <button
           onClick={() => setActiveTab('dashboard')}
           className={`flex flex-col items-center p-2 transition-all ${activeTab === 'dashboard' ? 'text-primary-600 scale-110' : 'text-gray-400'}`}
@@ -1551,16 +1577,40 @@ const App: React.FC = () => {
           <Tags size={24} />
           <span className="text-[10px] font-bold mt-1 uppercase">Narration</span>
         </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center p-2 transition-all ${activeTab === 'settings' ? 'text-primary-600 scale-110' : 'text-gray-400'}`}
-        >
-          <RefreshCcw size={24} />
-          <span className="text-[10px] font-bold mt-1 uppercase">Settings</span>
-        </button>
       </nav>
-      <SpeedInsights />
     </div>
+  );
+};
+
+
+// --- Error Boundary ---
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-10 text-center">
+          <h1 className="text-xl font-bold text-red-600">Something went wrong</h1>
+          <pre className="text-xs mt-4 p-4 bg-gray-100 rounded overflow-auto max-h-40">{this.state.error?.message}</pre>
+          <button onClick={() => window.location.reload()} className="mt-4 bg-blue-500 text-white px-4 py-2 rounded">Reload App</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const App: React.FC = () => {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 };
 
