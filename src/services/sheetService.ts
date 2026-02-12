@@ -20,7 +20,7 @@ export interface LedgerEntry {
     overdueDays?: number; // Days past due date (if available)
 }
 
-export const CACHE_VERSION = 'v20'; // Bumped for new data sync after excel update
+export const CACHE_VERSION = 'v21'; // Bumped to force comment visibility fix
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
@@ -131,7 +131,7 @@ function processRow(row: Record<string, string | number>, fieldMap: Record<strin
     };
 
     // Pre-calculate lowercase search string once
-    entry.searchString = `${entry.invoiceNo} ${entry.party} ${entry.mobileNo} ${entry.narration} ${entry.amount} ${!entry.narration ? 'blank' : ''}`.toLowerCase();
+    entry.searchString = `${entry.invoiceNo} ${entry.party} ${entry.mobileNo} ${entry.narration} ${entry.amount} ${entry.comment || ''} ${!entry.narration ? 'blank' : ''}`.toLowerCase();
     return entry;
 }
 
@@ -196,16 +196,20 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                     const mappings = {
                         date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.'],
                         party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR'],
+                        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT', 'comment', 'REMARKS', 'REMARK', 'Comment', 'Comments', 'NOTES', 'NOTE'], colour: ['COLOUR'],
                         dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
                     };
 
                     const firstRow = rawData[0] || {};
                     const fieldMap: Record<string, string> = {};
                     Object.entries(mappings).forEach(([key, possibleKeys]) => {
-                        const found = Object.keys(firstRow).find(f =>
-                            possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
-                        );
+                        const found = Object.keys(firstRow).find(f => {
+                            const normalizedField = f.trim().toLowerCase().replace(/\s+/g, '');
+                            return possibleKeys.some(pk => {
+                                const normalizedPk = pk.trim().toLowerCase().replace(/\s+/g, '');
+                                return normalizedField === normalizedPk;
+                            });
+                        });
                         if (found) fieldMap[key] = found;
                     });
 
@@ -246,13 +250,19 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                         narration: ['NARRATION', 'narration'],
                         dueDays: ['DUE DAYS', 'due days'],
                         mobileNo: ['MOBILE NO.', 'mobile no.', 'MOBILE NO. '],
-                        comment: ['COMMENT', 'comment'],
+                        comment: ['COMMENT', 'comment', 'REMARKS', 'REMARK', 'Comment', 'Comments', 'NOTES', 'NOTE'],
                         colour: ['COLOUR', 'colour'],
                         dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
                     };
 
                     Object.entries(mappings).forEach(([key, possibleKeys]) => {
-                        const found = fields.find(f => possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase()));
+                        const found = fields.find(f => {
+                            const normalizedField = f.trim().toLowerCase().replace(/\s+/g, '');
+                            return possibleKeys.some(pk => {
+                                const normalizedPk = pk.trim().toLowerCase().replace(/\s+/g, '');
+                                return normalizedField === normalizedPk;
+                            });
+                        });
                         if (found) fieldMap[key] = found;
                     });
 
@@ -290,16 +300,20 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
             const mappings = {
                 date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
                 party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-                dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR'],
+                dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT', 'comment', 'REMARKS', 'REMARK', 'Comment', 'Comments', 'NOTES', 'NOTE'], colour: ['COLOUR'],
                 dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
             };
 
             const firstRow = rawData[0] || {};
             const fieldMap: Record<string, string> = {};
             Object.entries(mappings).forEach(([key, possibleKeys]) => {
-                const found = Object.keys(firstRow).find(f =>
-                    possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
-                );
+                const found = Object.keys(firstRow).find(f => {
+                    const normalizedField = f.trim().toLowerCase().replace(/\s+/g, '');
+                    return possibleKeys.some(pk => {
+                        const normalizedPk = pk.trim().toLowerCase().replace(/\s+/g, '');
+                        return normalizedField === normalizedPk;
+                    });
+                });
                 if (found) fieldMap[key] = found;
             });
 

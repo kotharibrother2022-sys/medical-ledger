@@ -21,6 +21,8 @@ import {
   BookOpen,
   RefreshCw,
   LayoutGrid,
+  ChevronRight,
+  ArrowLeft,
   List as ListIcon
 } from 'lucide-react';
 import { format, parse } from 'date-fns';
@@ -63,17 +65,18 @@ export const generateAndSharePDF = async (entries: LedgerEntry[], title: string,
     entry.date,
     entry.party,
     entry.invoiceNo,
-    `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+    `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`,
+    entry.comment || ''
   ]);
 
   autoTable(doc, {
     startY: 65,
-    head: [['Date', 'Party Name', 'Invoice No', 'Amount']],
+    head: [['Date', 'Party Name', 'Invoice No', 'Amount', 'Comment']],
     body: tableData,
     theme: 'grid',
     headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
     styles: { fontSize: 8, cellPadding: 2.5 },
-    columnStyles: { 3: { halign: 'right' } }
+    columnStyles: { 3: { halign: 'right' }, 4: { fontSize: 7, fontStyle: 'italic' } }
   });
 
   // Footer / Totals
@@ -253,6 +256,7 @@ const TableViewHeader = () => (
     <div className="w-20 text-center hidden md:block">Status</div>
     <div className="w-16 text-right hidden md:block">Age</div>
     <div className="w-20 text-right hidden md:block">Due Date</div>
+    <div className="w-40 px-2 hidden md:block">Comment</div>
   </div>
 );
 
@@ -309,6 +313,7 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
       </div>
       <div className={`w-16 text-right text-[10px] font-black hidden md:block ${isOverdue ? 'text-red-600' : 'text-gray-400'}`}>{entry.dueDays}D</div>
       <div className="w-20 text-right text-[10px] font-bold text-blue-600 whitespace-nowrap hidden md:block">{entry.dueDate || '-'}</div>
+      <div className="w-40 px-2 text-[9px] font-medium text-amber-600 italic truncate hidden md:block" title={entry.comment}>{entry.comment || '-'}</div>
     </div>
   );
 };
@@ -355,17 +360,18 @@ const LedgerView = ({
       entry.date,
       entry.invoiceNo,
       entry.narration || 'BLANK',
-      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`,
+      entry.comment || ''
     ]);
 
     autoTable(doc, {
       startY: 65,
-      head: [['Date', 'Invoice No', 'Narration', 'Amount']],
+      head: [['Date', 'Invoice No', 'Narration', 'Amount', 'Comment']],
       body: tableData,
       theme: 'striped',
       headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
       styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: { 3: { halign: 'right' } }
+      columnStyles: { 3: { halign: 'right' }, 4: { fontSize: 8, fontStyle: 'italic' } }
     });
 
     const finalY = (doc as jsPDFWithAutoTable).lastAutoTable.finalY + 10;
@@ -414,13 +420,17 @@ const LedgerView = ({
       const amount = entry.amount || 0;
       const status = (entry.narration || '').toLowerCase();
       const isSettled = status.includes('received') || status.includes('cancel') || status.includes('delete');
+      const isOverdue = entry.overdueDays !== undefined && entry.overdueDays > 0 && !isSettled;
 
       return {
         totalAmount: acc.totalAmount + amount,
         totalDue: acc.totalDue + (isSettled ? 0 : amount),
-        totalPaid: acc.totalPaid + (isSettled ? amount : 0)
+        totalPaid: acc.totalPaid + (isSettled ? amount : 0),
+        totalOverdue: acc.totalOverdue + (isOverdue ? amount : 0),
+        dueCount: acc.dueCount + (isSettled ? 0 : 1),
+        overdueCount: acc.overdueCount + (isOverdue ? 1 : 0)
       };
-    }, { totalAmount: 0, totalDue: 0, totalPaid: 0 });
+    }, { totalAmount: 0, totalDue: 0, totalPaid: 0, totalOverdue: 0, dueCount: 0, overdueCount: 0 });
   }, [partyLedger]);
 
   return (
@@ -429,7 +439,7 @@ const LedgerView = ({
       <div className="p-4 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-gray-100 space-y-4">
 
         {/* Party Selector */}
-        <div className="flex justify-between items-end gap-2">
+        <div className="flex flex-col gap-4">
           <div className="flex-1">
             <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Select Party</label>
             <select
@@ -443,36 +453,50 @@ const LedgerView = ({
           </div>
 
           {selectedParty && partyLedger.length > 0 && (
-            <div className="flex flex-col gap-2 animate-in slide-in-from-top-2">
-              <div className="flex gap-2 items-stretch">
-                {/* Compact Total Balance Card */}
-                <div className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center">
-                  <div>
-                    <p className="text-[8px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Total Due</p>
-                    <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-                      ₹{totals.totalDue.toLocaleString('en-IN')}
-                    </p>
+            <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+              <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                {/* Total Due Card (Amber Style) */}
+                <div className="flex-shrink-0 w-44 bg-white p-3 rounded-2xl border-l-4 border-amber-500 shadow-sm flex flex-col justify-center">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
+                      <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider">Total Due</p>
+                    </div>
+                    <span className="text-[9px] font-bold text-gray-400">#{totals.dueCount}</span>
                   </div>
-                  <div className="text-right pl-4 border-l border-gray-700">
-                    <p className="text-xl font-black leading-none">{partyLedger.length}</p>
-                    <p className="text-[8px] font-bold text-gray-500 uppercase">Bills</p>
-                  </div>
+                  <p className="text-base font-black text-slate-900 tabular-nums">
+                    ₹{totals.totalDue.toLocaleString('en-IN')}
+                  </p>
                 </div>
 
-                {/* Actions */}
-                <div className="flex gap-2">
+                {/* Total Overdue Card (Red Style) */}
+                <div className="flex-shrink-0 w-44 bg-white p-3 rounded-2xl border-l-4 border-red-500 shadow-sm flex flex-col justify-center">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                      <p className="text-[9px] font-black text-red-600 uppercase tracking-wider">Overdue</p>
+                    </div>
+                    <span className="text-[9px] font-bold text-gray-400">#{totals.overdueCount}</span>
+                  </div>
+                  <p className="text-base font-black text-red-700 tabular-nums">
+                    ₹{totals.totalOverdue.toLocaleString('en-IN')}
+                  </p>
+                </div>
+
+                {/* Actions Inline */}
+                <div className="flex gap-2 items-center pl-2">
                   <button
                     onClick={() => shareViaWhatsAppText(partyLedger, `Ledger_${selectedParty}`, `Full Statement`, "TOTAL DUE")}
-                    className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
+                    className="bg-[#25D366] text-white p-3 rounded-xl shadow-lg shadow-green-100 active:scale-90 transition-all flex items-center justify-center"
                     title="Share Text to WhatsApp"
                   >
                     <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
-                      <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
+                      <span className="text-[10px] font-extrabold text-[#25D366]">W</span>
                     </div>
                   </button>
                   <button
                     onClick={exportToPDF}
-                    className="bg-primary-600 text-white px-4 rounded-xl shadow-lg shadow-primary-200 active:scale-90 transition-all flex items-center justify-center"
+                    className="bg-primary-600 text-white p-3 rounded-xl shadow-lg shadow-primary-100 active:scale-90 transition-all flex items-center justify-center"
                     title="Download PDF"
                   >
                     <FileDown size={20} />
@@ -543,12 +567,12 @@ const AgeingView = ({
       const isSettled = status === 'received' || status === 'cancel' || status === 'credit note' || status === 'delete';
       if (isSettled) return false;
 
-      // 2. Match Age Group
-      const d = entry.dueDays;
-      if (selectedGroup === '0-30 Days') return d <= 30;
-      if (selectedGroup === '31-60 Days') return d > 30 && d <= 60;
-      if (selectedGroup === '61-90 Days') return d > 60 && d <= 90;
-      if (selectedGroup === '91+ Days') return d > 90;
+      // 2. Match Due Date Logic
+      const od = entry.overdueDays;
+      if (selectedGroup === 'Overdue 1-30d') return od !== undefined && od > 0 && od <= 30;
+      if (selectedGroup === 'Overdue 31-60d') return od !== undefined && od > 30 && od <= 60;
+      if (selectedGroup === 'Overdue 61+d') return od !== undefined && od > 60;
+      if (selectedGroup === 'Upcoming / Due') return od === undefined || od <= 0;
       return false;
     });
   }, [data, selectedGroup]);
@@ -556,21 +580,25 @@ const AgeingView = ({
   // Totals
   const totalAmount = useMemo(() => filteredData.reduce((acc, curr) => acc + (curr.amount || 0), 0), [filteredData]);
 
+  const isOverdueGroup = selectedGroup.includes('Overdue');
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       {/* Header Card */}
       <div className="p-4 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-gray-100">
         <div className="flex items-stretch gap-2 animate-in slide-in-from-top-2">
-          <div className="flex-1 bg-red-600 text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center shadow-red-200">
+          <div className={`flex-1 ${isOverdueGroup ? 'bg-red-600 shadow-red-200' : 'bg-indigo-600 shadow-indigo-200'} text-white px-4 py-2 rounded-xl shadow-lg flex justify-between items-center`}>
             <div>
-              <p className="text-[8px] text-red-100 font-bold uppercase tracking-wider mb-0.5">Overdue: {selectedGroup}</p>
-              <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-red-200 bg-clip-text text-transparent">
+              <p className={`text-[8px] ${isOverdueGroup ? 'text-red-100' : 'text-indigo-100'} font-bold uppercase tracking-wider mb-0.5`}>
+                {isOverdueGroup ? 'Overdue Status' : 'Due Status'}: {selectedGroup}
+              </p>
+              <p className="text-lg font-black leading-none bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
                 ₹{totalAmount.toLocaleString('en-IN')}
               </p>
             </div>
-            <div className="text-right pl-4 border-l border-red-400/30">
+            <div className={`text-right pl-4 border-l ${isOverdueGroup ? 'border-red-400/30' : 'border-indigo-400/30'}`}>
               <p className="text-xl font-black leading-none text-white">{filteredData.length}</p>
-              <p className="text-[8px] font-bold text-red-100 uppercase">Bills</p>
+              <p className={`text-[8px] font-bold ${isOverdueGroup ? 'text-red-100' : 'text-indigo-100'} uppercase`}>Bills</p>
             </div>
           </div>
 
@@ -609,6 +637,131 @@ const AgeingView = ({
   );
 };
 
+const PartySummaryView = ({ data, onPartyClick }: { data: LedgerEntry[], onPartyClick: (party: string) => void }) => {
+  const summary = useMemo(() => {
+    const parties: Record<string, { total: number, due: number, overdue: number, count: number }> = {};
+
+    data.forEach(e => {
+      const status = (e.narration || '').toUpperCase();
+      const isExcluded = ['DELETE', 'CANCEL', 'CREDIT NOTE'].includes(status);
+      const isPaid = ['RECEIVED', 'BOOK', 'SUSPENSE'].includes(status);
+
+      if (!parties[e.party]) {
+        parties[e.party] = { total: 0, due: 0, overdue: 0, count: 0 };
+      }
+
+      if (!isExcluded) {
+        parties[e.party].total += e.amount;
+        if (!isPaid) {
+          parties[e.party].due += e.amount;
+          // Logic: Overdue is anything with positive overdueDays (meaning due date is in the past)
+          if (e.overdueDays !== undefined && e.overdueDays > 0) {
+            parties[e.party].overdue += e.amount;
+          }
+        }
+      }
+      parties[e.party].count++;
+    });
+
+    const partyList = Object.entries(parties)
+      .map(([name, stats]) => ({ name, ...stats }))
+      .sort((a, b) => b.due - a.due);
+
+    // Calculate totals for summary cards
+    const grandTotals = partyList.reduce((acc, curr) => ({
+      due: acc.due + curr.due,
+      overdue: acc.overdue + curr.overdue
+    }), { due: 0, overdue: 0 });
+
+    return { partyList, grandTotals };
+  }, [data]);
+
+  return (
+    <div className="flex flex-col h-full bg-slate-50">
+      <div className="p-4 bg-white border-b border-gray-100 shadow-sm sticky top-0 z-30">
+        <h2 className="text-lg font-black text-gray-900 uppercase tracking-tight">Party-wise Summary</h2>
+        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Aggregate Outstanding Control</p>
+      </div>
+
+      {/* Total Due & Overdue Cards (Home Tab style) */}
+      <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar pb-4 pt-4 z-20">
+        <div className="flex-shrink-0 w-48 bg-white p-3.5 rounded-2xl border-l-4 border-amber-500 shadow-sm flex flex-col justify-center">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
+            <p className="text-[10px] font-black text-amber-600 uppercase tracking-wider">Grand Total Due</p>
+          </div>
+          <p className="text-lg font-black text-slate-900 tabular-nums">
+            ₹{summary.grandTotals.due.toLocaleString('en-IN')}
+          </p>
+        </div>
+        <div className="flex-shrink-0 w-48 bg-white p-3.5 rounded-2xl border-l-4 border-red-500 shadow-sm flex flex-col justify-center">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+            <p className="text-[10px] font-black text-red-600 uppercase tracking-wider">Total Overdue</p>
+          </div>
+          <p className="text-lg font-black text-red-700 tabular-nums">
+            ₹{summary.grandTotals.overdue.toLocaleString('en-IN')}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto no-scrollbar">
+        <div className="min-w-full inline-block align-middle">
+          <table className="w-full text-left border-collapse bg-white">
+            <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
+              <tr>
+                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-wider border-b border-gray-200">Party Name</th>
+                <th className="px-4 py-2 text-[10px] font-black text-gray-500 uppercase tracking-wider text-right border-b border-gray-200">Total Due</th>
+                <th className="px-4 py-2 text-[10px] font-black text-gray-500 uppercase tracking-wider text-right border-b border-gray-200">Overdue</th>
+                <th className="px-2 py-2 border-b border-gray-200"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {summary.partyList.map((p) => (
+                <tr
+                  key={p.name}
+                  className="hover:bg-blue-50/50 transition-colors active:bg-blue-50 cursor-pointer"
+                  onClick={() => onPartyClick(p.name)}
+                >
+                  <td className="px-4 py-3">
+                    <p className="text-xs font-black text-gray-900 uppercase tracking-tighter truncate max-w-[140px]">{p.name || 'UNKNOWN'}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[9px] font-bold text-gray-400">Bills: {p.count}</span>
+                      <span className="text-[9px] font-bold text-gray-400 bg-gray-50 px-1 rounded">Total: ₹{p.total.toLocaleString('en-IN')}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <p className="text-sm font-black text-primary-700">₹{p.due.toLocaleString('en-IN')}</p>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {p.overdue > 0 ? (
+                      <span className="inline-block bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-[10px] font-black border border-red-100 shadow-sm shadow-red-50">
+                        ₹{p.overdue.toLocaleString('en-IN')}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-gray-300">₹0</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-3 text-center">
+                    <ChevronRight size={14} className="text-gray-300" />
+                  </td>
+                </tr>
+              ))}
+              {summary.partyList.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-10 text-center text-gray-400 font-bold uppercase tracking-tight opacity-50">
+                    No data available
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ReportsView = ({
   data,
   onPartyClick,
@@ -628,16 +781,20 @@ const ReportsView = ({
 
   const ageingGroups = useMemo(() => {
     const groups = {
-      '0-30 Days': 0,
-      '31-60 Days': 0,
-      '61-90 Days': 0,
-      '91+ Days': 0
+      'Overdue 1-30d': 0,
+      'Overdue 31-60d': 0,
+      'Overdue 61+d': 0,
+      'Upcoming / Due': 0
     };
     pendingData.forEach(entry => {
-      if (entry.dueDays <= 30) groups['0-30 Days'] += entry.amount;
-      else if (entry.dueDays <= 60) groups['31-60 Days'] += entry.amount;
-      else if (entry.dueDays <= 90) groups['61-90 Days'] += entry.amount;
-      else groups['91+ Days'] += entry.amount;
+      const od = entry.overdueDays;
+      if (od !== undefined && od > 0) {
+        if (od <= 30) groups['Overdue 1-30d'] += entry.amount;
+        else if (od <= 60) groups['Overdue 31-60d'] += entry.amount;
+        else groups['Overdue 61+d'] += entry.amount;
+      } else {
+        groups['Upcoming / Due'] += entry.amount;
+      }
     });
     return groups;
   }, [pendingData]);
@@ -678,7 +835,7 @@ const ReportsView = ({
               className="glass p-4 rounded-2xl border-l-4 border-primary-400 active:scale-95 transition-transform cursor-pointer hover:bg-primary-50"
             >
               <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">{label}</p>
-              <p className="text-lg font-black text-gray-900">₹{(amount / 1000).toFixed(1)}K</p>
+              <p className="text-lg font-black text-gray-900">₹{amount.toLocaleString('en-IN')}</p>
             </div>
           ))}
         </div>
@@ -819,17 +976,18 @@ const NarrationView = ({
       entry.date,
       entry.party,
       entry.invoiceNo,
-      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`
+      `Rs. ${(entry.amount || 0).toLocaleString('en-IN')}`,
+      entry.comment || ''
     ]);
 
     autoTable(doc, {
       startY: 65,
-      head: [['Date', 'Party Name', 'Invoice No', 'Amount']],
+      head: [['Date', 'Party Name', 'Invoice No', 'Amount', 'Comment']],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
       styles: { fontSize: 8, cellPadding: 2.5 },
-      columnStyles: { 3: { halign: 'right' } }
+      columnStyles: { 3: { halign: 'right' }, 4: { fontSize: 7, fontStyle: 'italic' } }
     });
 
     const finalY = (doc as jsPDFWithAutoTable).lastAutoTable.finalY + 10;
@@ -938,11 +1096,7 @@ const AppContent: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [, setRefreshing] = useState(false);
   const [pendingOnly, setPendingOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration' | 'ageing' | 'settings'>('dashboard');
-
-  const [, setLastUpdated] = useState<string | null>(() => {
-    return localStorage.getItem(`cachedTime_${DEFAULT_YEAR}`);
-  });
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'ledger' | 'narration' | 'ageing' | 'parties' | 'settings'>('dashboard');
 
   const [loadingProgress, setLoadingProgress] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -950,6 +1104,50 @@ const AppContent: React.FC = () => {
   const [viewMode, setViewMode] = useState<'card' | 'table'>(() => {
     return (localStorage.getItem('preferredViewMode') as 'card' | 'table') || 'card';
   });
+
+  // --- NEW: History Sync Logic (Back Button Support) ---
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#/', '');
+      const [tab, query] = hash.split('?');
+      const searchParams = new URLSearchParams(query);
+
+      if (['dashboard', 'reports', 'ledger', 'narration', 'ageing', 'parties'].includes(tab)) {
+        setActiveTab(tab as any);
+
+        // Restore context if present in URL
+        const party = searchParams.get('party');
+        if (party) setSelectedParty(party);
+        const unit = searchParams.get('narration');
+        if (unit) setSelectedNarration(unit);
+        const group = searchParams.get('group');
+        if (group) setSelectedAgeingGroup(group);
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    if (!window.location.hash || window.location.hash === '#/') {
+      window.location.hash = '#/dashboard';
+    } else {
+      handleHashChange();
+    }
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Sync state changes TO hash
+  useEffect(() => {
+    let hash = `#/${activeTab}`;
+    const params = new URLSearchParams();
+    if (activeTab === 'ledger' && selectedParty) params.set('party', selectedParty);
+    if (activeTab === 'narration' && selectedNarration) params.set('narration', selectedNarration);
+    if (activeTab === 'ageing' && selectedAgeingGroup) params.set('group', selectedAgeingGroup);
+
+    if (params.toString()) hash += `?${params.toString()}`;
+    if (window.location.hash !== hash) {
+      window.history.pushState(null, '', hash);
+    }
+  }, [activeTab, selectedParty, selectedNarration, selectedAgeingGroup]);
+  // ---------------------------------------------------
 
   useEffect(() => {
     localStorage.setItem('preferredViewMode', viewMode);
@@ -1052,7 +1250,6 @@ const AppContent: React.FC = () => {
         } else {
           // Cache is fresh, use it
           setData(cachedData);
-          setLastUpdated(cachedTime);
           setLoading(false);
           setRefreshing(false);
           return;
@@ -1064,7 +1261,6 @@ const AppContent: React.FC = () => {
         setRefreshing(true);
         if (data.length === 0) {
           setData(cachedData);
-          setLastUpdated(cachedTime);
         }
       } else {
         setLoading(true);
@@ -1090,7 +1286,6 @@ const AppContent: React.FC = () => {
       console.log('[LOAD] Setting data state with', ledgerData.length, 'records');
       setData(ledgerData);
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setLastUpdated(now);
 
       // 5. CACHE IN BACKGROUND (Use IndexedDB for large JSON)
       if (year !== 'ALL_TIME') {
@@ -1136,7 +1331,6 @@ const AppContent: React.FC = () => {
         if (cached && Array.isArray(cached) && cached.length > 0) {
           setData(cached);
           setLoading(false);
-          setLastUpdated(localStorage.getItem(`cachedTime_${selectedYear}`));
           // Background sync to ensure data is fresh
           loadData(selectedYear, false);
         } else {
@@ -1241,12 +1435,7 @@ const AppContent: React.FC = () => {
 
 
 
-  const lastEntryDate = useMemo(() => {
-    if (data.length === 0) return null;
-    const maxTs = data.reduce((max, e) => (e.timestamp > max ? e.timestamp : max), 0);
-    console.log('[DEBUG] Max Timestamp:', maxTs, 'Formatted:', maxTs ? new Date(maxTs).toLocaleDateString() : 'None');
-    return maxTs ? new Date(maxTs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
-  }, [data]);
+
 
   if (loading) {
     return (
@@ -1266,20 +1455,22 @@ const AppContent: React.FC = () => {
       <header className="glass sticky top-0 z-50 px-4 py-4 border-b border-gray-200">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center">
-            <div className="bg-primary-600 p-2 rounded-xl text-white mr-3 shadow-lg shadow-primary-200">
-              <LayoutDashboard size={20} />
-            </div>
+            {activeTab !== 'dashboard' ? (
+              <button
+                onClick={() => window.history.back()}
+                className="bg-primary-50 p-2 rounded-xl text-primary-600 mr-3 shadow-sm border border-primary-100 active:scale-90 transition-all"
+              >
+                <ArrowLeft size={20} />
+              </button>
+            ) : (
+              <div className="bg-primary-600 p-2 rounded-xl text-white mr-3 shadow-lg shadow-primary-200">
+                <LayoutDashboard size={20} />
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
                 <div className="flex gap-1 items-center">
-                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION} ({new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})</span>
-                  {data.length > 0 && (
-                    <span className="bg-green-100 text-green-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-green-200 whitespace-nowrap">
-                      Last: {lastEntryDate}
-                    </span>
-                  )}
-                  <span className="bg-slate-100 text-slate-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-slate-200">RAW: {data.length}</span>
                 </div>
               </div>
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] mt-0.5 whitespace-nowrap">A PHARMACEUTICAL DEALERS</p>
@@ -1297,18 +1488,6 @@ const AppContent: React.FC = () => {
             >
               <RefreshCw size={14} className={loading ? 'animate-spin text-primary-600' : ''} />
               <span className="text-[10px] font-bold uppercase hidden sm:inline">Sync</span>
-            </button>
-            <button
-              onClick={() => {
-                if (window.confirm("Hard Reset: This will clear all local data, unregister service workers, and reload.\n\nUse this if the app feels 'stuck'.")) {
-                  handleHardReset();
-                }
-              }}
-              className="bg-red-600 text-white hover:bg-red-700 p-2 rounded-lg shadow-md shadow-red-100 transition-all active:scale-90 flex items-center gap-2"
-              title="Clear all cache and reload"
-            >
-              <RefreshCw size={14} />
-              <span className="text-[10px] font-bold uppercase hidden sm:inline">Reset</span>
             </button>
             <select
               value={selectedYear}
@@ -1555,6 +1734,14 @@ const AppContent: React.FC = () => {
               setActiveTab('ledger');
             }}
           />
+        ) : activeTab === 'parties' ? (
+          <PartySummaryView
+            data={data}
+            onPartyClick={(party) => {
+              setSelectedParty(party);
+              setActiveTab('ledger');
+            }}
+          />
         ) : activeTab === 'ageing' ? (
           <AgeingView
             data={data}
@@ -1600,6 +1787,13 @@ const AppContent: React.FC = () => {
         >
           <Tags size={24} />
           <span className="text-[10px] font-bold mt-1 uppercase">Narration</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('parties')}
+          className={`flex flex-col items-center p-2 transition-all ${activeTab === 'parties' ? 'text-primary-600 scale-110' : 'text-gray-400'}`}
+        >
+          <Users size={24} />
+          <span className="text-[10px] font-bold mt-1 uppercase">Parties</span>
         </button>
       </nav>
     </div>

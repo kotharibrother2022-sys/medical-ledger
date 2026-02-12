@@ -1,0 +1,8 @@
+kind: "AppStack"
+schemaVersion: "v1"
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+scripts:
+  buildCommand: "npm run build"
+  runCommand: "npm run preview"

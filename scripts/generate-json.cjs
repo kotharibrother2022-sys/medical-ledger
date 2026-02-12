@@ -70,7 +70,8 @@ function getSearchString(row, fieldMap) {
     const mobileNo = String(row[fieldMap.mobileNo] || '');
     const narration = String(row[fieldMap.narration] || '');
     const amount = String(row[fieldMap.amount] || '');
-    return `${invoiceNo} ${party} ${mobileNo} ${narration} ${amount} ${!narration ? 'blank' : ''}`.toLowerCase();
+    const comment = String(row[fieldMap.comment] || '');
+    return `${invoiceNo} ${party} ${mobileNo} ${narration} ${amount} ${comment} ${!narration ? 'blank' : ''}`.toLowerCase();
 }
 
 function convertExcelToSplitJson() {
@@ -80,7 +81,7 @@ function convertExcelToSplitJson() {
     const mappings = {
         date: ['DATE'], sNo: ['S.NO.', 's.no.'], invoiceNo: ['INVOICE NO.', 'CHALLAN NO.', 'INVOICE         NO.'],
         party: ['PARTY', 'name', 'party'], amount: ['AMOUNT'], narration: ['NARRATION'],
-        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT'], colour: ['COLOUR'],
+        dueDays: ['DUE DAYS'], mobileNo: ['MOBILE NO.'], comment: ['COMMENT', 'comment', 'REMARKS', 'REMARK', 'Comment', 'Comments', 'NOTES', 'NOTE'], colour: ['COLOUR'],
         dueDate: ['DUE DATE', 'due date', 'DUEDATE', 'DUE DATES', 'due dates']
     };
 
@@ -99,9 +100,13 @@ function convertExcelToSplitJson() {
         const firstRow = rawData[0];
         const fieldMap = {};
         Object.entries(mappings).forEach(([key, possibleKeys]) => {
-            const found = Object.keys(firstRow).find(f =>
-                possibleKeys.some(pk => f.trim().toLowerCase() === pk.trim().toLowerCase())
-            );
+            const found = Object.keys(firstRow).find(f => {
+                const normalizedField = f.trim().toLowerCase().replace(/\s+/g, '');
+                return possibleKeys.some(pk => {
+                    const normalizedPk = pk.trim().toLowerCase().replace(/\s+/g, '');
+                    return normalizedField === normalizedPk;
+                });
+            });
             if (found) fieldMap[key] = found;
         });
 
