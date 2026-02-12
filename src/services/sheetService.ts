@@ -139,7 +139,8 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
     if (year === 'ALL_TIME') return fetchAllYearsData(ignoreCache);
 
     // Strategy: First try fetching from our lightning-fast split JSON store
-    if (!ignoreCache) {
+    // BUT in Development, skip this to force live Sheet updates for easier debugging
+    if (!ignoreCache && !import.meta.env.DEV) {
         try {
             // Construct filename: "25-26" -> "ledger-2526.json"
             let safeYear = year.replace(/-/g, '_').toLowerCase();

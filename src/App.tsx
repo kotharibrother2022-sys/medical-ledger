@@ -35,7 +35,7 @@ interface jsPDFWithAutoTable extends jsPDF {
 }
 
 // --- Shared PDF Generator ---
-const generateAndSharePDF = async (entries: LedgerEntry[], title: string, subtitle: string, totalLabel: string = "TOTAL DUE") => {
+export const generateAndSharePDF = async (entries: LedgerEntry[], title: string, subtitle: string, totalLabel: string = "TOTAL DUE") => {
   if (!entries || entries.length === 0) return;
 
   const doc = new jsPDF();
@@ -107,6 +107,33 @@ const generateAndSharePDF = async (entries: LedgerEntry[], title: string, subtit
     doc.save(fileName);
     alert("Sharing not supported on this device/browser. File downloaded.");
   }
+};
+
+// --- WhatsApp Text Share ---
+const shareViaWhatsAppText = (entries: LedgerEntry[], title: string, subtitle: string, totalLabel: string) => {
+  if (!entries || entries.length === 0) return;
+
+  const totalAmount = entries.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+  let message = `*KOTHARI BROTHERS*\n`;
+  message += `*${title.replace(/_/g, ' ')}*\n`; // Clean title
+  message += `*${subtitle}*\n`;
+  message += `*${totalLabel}:* Rs. ${totalAmount.toLocaleString('en-IN')}\n\n`;
+  message += `*Pending Bills:*\n`;
+
+  entries.slice(0, 15).forEach(e => {
+    message += `• ${e.date} (#${e.invoiceNo}) - Rs. ${(e.amount || 0).toLocaleString('en-IN')}\n`;
+  });
+
+  if (entries.length > 15) {
+    message += `...and ${entries.length - 15} more items.\n`;
+  }
+
+  message += `\n*Please pay immediately.*`;
+
+  // Use wa.me for universal link (Desktop + Mobile)
+  const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
 };
 
 // --- Compact Card Component (Unified High-Density UI) ---
@@ -435,9 +462,9 @@ const LedgerView = ({
                 {/* Actions */}
                 <div className="flex gap-2">
                   <button
-                    onClick={() => generateAndSharePDF(partyLedger, `Ledger_${selectedParty}`, `Full Statement`, "TOTAL DUE")}
+                    onClick={() => shareViaWhatsAppText(partyLedger, `Ledger_${selectedParty}`, `Full Statement`, "TOTAL DUE")}
                     className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
-                    title="Share to WhatsApp"
+                    title="Share Text to WhatsApp"
                   >
                     <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
                       <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
@@ -549,9 +576,9 @@ const AgeingView = ({
 
           <div className="flex gap-2">
             <button
-              onClick={() => generateAndSharePDF(filteredData, `Ageing_${selectedGroup.replace(/\s+/g, '')}`, `Outstanding Bills (${selectedGroup})`, "TOTAL OVERDUE")}
+              onClick={() => shareViaWhatsAppText(filteredData, `Ageing_${selectedGroup.replace(/\s+/g, '')}`, `Outstanding Bills (${selectedGroup})`, "TOTAL OVERDUE")}
               className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
-              title="Share PDF to WhatsApp"
+              title="Share Text to WhatsApp"
             >
               <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
                 <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
@@ -851,9 +878,9 @@ const NarrationView = ({
 
             <div className="flex gap-2">
               <button
-                onClick={() => generateAndSharePDF(narrationLedger, `Narration_${selectedNarration}`, "Pending Bills in Group", "TOTAL PENDING")}
+                onClick={() => shareViaWhatsAppText(narrationLedger, `Narration_${selectedNarration}`, "Pending Bills in Group", "TOTAL PENDING")}
                 className="bg-[#25D366] text-white px-4 rounded-xl shadow-lg shadow-green-200 active:scale-90 transition-all flex items-center justify-center"
-                title="Share PDF to WhatsApp"
+                title="Share Text to WhatsApp"
               >
                 <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
                   <span className="text-[12px] font-extrabold text-[#25D366]">W</span>
@@ -1214,6 +1241,13 @@ const AppContent: React.FC = () => {
 
 
 
+  const lastEntryDate = useMemo(() => {
+    if (data.length === 0) return null;
+    const maxTs = data.reduce((max, e) => (e.timestamp > max ? e.timestamp : max), 0);
+    console.log('[DEBUG] Max Timestamp:', maxTs, 'Formatted:', maxTs ? new Date(maxTs).toLocaleDateString() : 'None');
+    return maxTs ? new Date(maxTs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+  }, [data]);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
@@ -1239,7 +1273,12 @@ const AppContent: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
                 <div className="flex gap-1 items-center">
-                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION} ({new Date().toLocaleTimeString()})</span>
+                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION} ({new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})</span>
+                  {data.length > 0 && (
+                    <span className="bg-green-100 text-green-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-green-200 whitespace-nowrap">
+                      Last: {lastEntryDate}
+                    </span>
+                  )}
                   <span className="bg-slate-100 text-slate-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-slate-200">RAW: {data.length}</span>
                 </div>
               </div>
