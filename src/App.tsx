@@ -935,6 +935,26 @@ const AppContent: React.FC = () => {
   }, [viewMode]);
 
 
+  // Hard Reset Handler
+  const handleHardReset = async () => {
+    if (window.confirm("This will clear all local cache and reload the app from the server. Continue?")) {
+      try {
+        // Clear LocalStorage
+        localStorage.clear();
+        // Clear IndexedDB
+        const yearsToClear = [...Object.keys(YEAR_GIDS), 'ALL_TIME'];
+        for (const y of yearsToClear) {
+          await set(`cachedLedgerData_${y}`, null);
+        }
+        // Force Reload
+        window.location.reload();
+      } catch (e) {
+        console.error("Reset failed", e);
+        alert("Reset failed. Please clear your browser data manually.");
+      }
+    }
+  };
+
   // Quick Status Update Handler
   const handleUpdateStatus = async (invoiceNo: string, currentStatus: string) => {
     // Cycle through: PENDING (empty) -> RECEIVED -> PENDING
@@ -1028,14 +1048,15 @@ const AppContent: React.FC = () => {
 
       // 3. Network Fetch
       if (year === 'ALL_TIME') {
-        setLoadingProgress('Syncing all years...');
+        setLoadingProgress('Syncing all years (Live)...');
         ledgerData = await fetchAllYearsData(forceRefresh);
       } else {
-        setLoadingProgress(`Syncing ${year}...`);
+        const source = forceRefresh ? 'Live' : 'Cache/JSON';
+        setLoadingProgress(`Syncing ${year} (${source})...`);
         ledgerData = await fetchLedgerData(year, forceRefresh);
       }
 
-      console.log(`[LOAD] Fetch took ${(performance.now() - startTime).toFixed(2)}ms for ${ledgerData.length} rows`);
+      console.log(`[LOAD] Source: ${forceRefresh ? 'LIVE' : 'CACHE/JSON'}. Fetch took ${(performance.now() - startTime).toFixed(2)}ms for ${ledgerData.length} rows`);
 
       // 4. Update State & UI
       console.log('[LOAD] Setting data state with', ledgerData.length, 'records');
@@ -1233,6 +1254,14 @@ const AppContent: React.FC = () => {
             >
               <RefreshCw size={14} className={loading ? 'animate-spin text-primary-600' : ''} />
               <span className="text-[10px] font-bold uppercase hidden sm:inline">Sync</span>
+            </button>
+            <button
+              onClick={handleHardReset}
+              className="bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 p-2 rounded-lg shadow-sm transition-all active:scale-90 flex items-center gap-2"
+              title="Clear all cache and reload"
+            >
+              <RefreshCw size={14} />
+              <span className="text-[10px] font-bold uppercase hidden sm:inline">Reset</span>
             </button>
             <select
               value={selectedYear}

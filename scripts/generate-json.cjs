@@ -158,7 +158,10 @@ function convertExcelToSplitJson() {
         });
 
         // Sanitize filename
-        const safeName = sheetName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        let safeName = sheetName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        if (sheetName === '25-26') {
+            safeName = '2526';
+        }
         const outputPath = path.join(DATA_DIR, `ledger-${safeName}.json`);
 
         console.log(`Writing ${sheetName} (${processedData.length} rows) to ${outputPath}...`);

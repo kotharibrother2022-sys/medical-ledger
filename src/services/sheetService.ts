@@ -141,22 +141,21 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
     // Strategy: First try fetching from our lightning-fast split JSON store
     if (!ignoreCache) {
         try {
-            // Construct filename: "25-26" -> "ledger-25_26.json" normally
-            // BUT, if year is "25-26", check for "ledger-2526.json" first as per new sheet naming
+            // Construct filename: "25-26" -> "ledger-2526.json"
             let safeYear = year.replace(/-/g, '_').toLowerCase();
             if (year === '25-26') {
-                // Try the new convention first
                 safeYear = '2526';
             }
 
             const jsonUrl = `/data/ledger-${safeYear}.json`;
+            console.log(`[SYNC] Checking JSON store: ${jsonUrl}`);
             const response = await fetch(`${jsonUrl}?t=${Date.now()}`);
 
             if (response.ok) {
                 const rawData = await response.json();
 
                 if (rawData && Array.isArray(rawData)) {
-                    console.log(`⚡ Loaded ${year} from split JSON store (${jsonUrl})`);
+                    console.log(`⚡ [SYNC] Loaded ${year} from split JSON store (${jsonUrl})`);
 
                     // If the JSON is already pre-processed (has searchString), return it directly for extreme speed
                     if (rawData.length > 0 && (rawData[0] as LedgerEntry).searchString) {
