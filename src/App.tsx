@@ -936,7 +936,7 @@ const AppContent: React.FC = () => {
 
 
   // Hard Reset Handler
-  const handleHardReset = async () => {
+  async function handleHardReset() {
     if (window.confirm("This will clear all local cache and reload the app from the server. Continue?")) {
       try {
         // Clear LocalStorage
@@ -953,7 +953,7 @@ const AppContent: React.FC = () => {
         alert("Reset failed. Please clear your browser data manually.");
       }
     }
-  };
+  }
 
   // Quick Status Update Handler
   const handleUpdateStatus = async (invoiceNo: string, currentStatus: string) => {
@@ -1238,7 +1238,7 @@ const AppContent: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none uppercase">KOTHARI <span className="text-primary-600">BROTHERS</span></h1>
                 <div className="flex gap-1 items-center">
-                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION}</span>
+                  <span className="bg-amber-100 text-amber-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-amber-200">{CACHE_VERSION} ({new Date().toLocaleTimeString()})</span>
                   <span className="bg-slate-100 text-slate-700 text-[8px] font-black px-1.5 py-0.5 rounded-full border border-slate-200">RAW: {data.length}</span>
                 </div>
               </div>
@@ -1257,7 +1257,7 @@ const AppContent: React.FC = () => {
             </button>
             <button
               onClick={handleHardReset}
-              className="bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 p-2 rounded-lg shadow-sm transition-all active:scale-90 flex items-center gap-2"
+              className="bg-red-600 text-white hover:bg-red-700 p-2 rounded-lg shadow-md shadow-red-100 transition-all active:scale-90 flex items-center gap-2"
               title="Clear all cache and reload"
             >
               <RefreshCw size={14} />
