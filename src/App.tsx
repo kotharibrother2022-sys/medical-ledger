@@ -1,4 +1,3 @@
-console.log('[DEBUG] App.tsx module loading...');
 import React, { useState, useEffect, useMemo, useDeferredValue, useCallback } from 'react';
 import { get, set } from 'idb-keyval';
 import { fetchLedgerData, fetchAllYearsData, updateLedgerEntry, type LedgerEntry, type FinancialYear, YEAR_GIDS, CACHE_VERSION } from './services/sheetService';
@@ -121,11 +120,6 @@ const CompactCard = ({ entry, onUpdateStatus, updatingInvoice, onPartyClick }: a
 
   const colourLower = (entry.colour || '').toLowerCase();
 
-  // Debug: Log color values to console
-  if (entry.colour) {
-    console.log(`[COLOR DEBUG] Invoice ${entry.invoiceNo}: colour="${entry.colour}", colourLower="${colourLower}"`);
-  }
-
   const getCardStyle = () => {
     if (isReceived) return 'border-green-200 bg-green-50/40';
     if (isCancelled) return 'border-gray-200 bg-gray-50/30 grayscale opacity-70';
@@ -226,12 +220,12 @@ const Row = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPartyCl
 const TableViewHeader = () => (
   <div className="flex bg-slate-200/50 border-b border-gray-200 px-4 py-2 text-[10px] font-black text-gray-500 uppercase tracking-tighter sticky top-0 z-10 backdrop-blur-sm">
     <div className="w-16">Inv #</div>
-    <div className="w-20 text-right pr-2">Date</div>
-    <div className="flex-1 min-w-0 px-2">Party Name</div>
+    <div className="w-20 text-right pr-2 hidden md:block">Date</div>
+    <div className="flex-1 min-w-[100px] px-2 truncate">Party Name</div>
     <div className="w-24 text-right">Amount</div>
-    <div className="w-20 text-center">Status</div>
-    <div className="w-16 text-right">Age</div>
-    <div className="w-20 text-right">Due Date</div>
+    <div className="w-20 text-center hidden md:block">Status</div>
+    <div className="w-16 text-right hidden md:block">Age</div>
+    <div className="w-20 text-right hidden md:block">Due Date</div>
   </div>
 );
 
@@ -263,8 +257,8 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
   return (
     <div style={style} className={`flex items-center px-4 border-b border-gray-100 hover:bg-blue-50/50 transition-colors cursor-pointer group ${getRowStyle()}`} onClick={() => onPartyClick(entry.party)}>
       <div className="w-16 text-[9px] font-bold text-gray-400">#{entry.invoiceNo}</div>
-      <div className="w-20 text-right text-[10px] font-bold text-gray-500 whitespace-nowrap pr-2">{entry.date}</div>
-      <div className="flex-1 min-w-0 px-2">
+      <div className="w-20 text-right text-[10px] font-bold text-gray-500 whitespace-nowrap pr-2 hidden md:block">{entry.date}</div>
+      <div className="flex-1 min-w-[100px] px-2 truncate">
         <div className="flex items-center gap-1.5">
           {entry.colour && (
             <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.colour.toLowerCase() }} />
@@ -273,7 +267,7 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
         </div>
       </div>
       <div className="w-24 text-right text-[11px] font-black text-gray-900 leading-none">₹{(entry.amount || 0).toLocaleString('en-IN')}</div>
-      <div className="w-20 flex justify-center px-2">
+      <div className="w-20 flex justify-center px-2 hidden md:block">
         <div
           onClick={(e) => {
             e.stopPropagation();
@@ -286,8 +280,8 @@ const TableRow = ({ index, style, entries, onUpdateStatus, updatingInvoice, onPa
           {entry.narration || 'UNPAID'}
         </div>
       </div>
-      <div className={`w-16 text-right text-[10px] font-black ${isOverdue ? 'text-red-600' : 'text-gray-400'}`}>{entry.dueDays}D</div>
-      <div className="w-20 text-right text-[10px] font-bold text-blue-600 whitespace-nowrap">{entry.dueDate || '-'}</div>
+      <div className={`w-16 text-right text-[10px] font-black hidden md:block ${isOverdue ? 'text-red-600' : 'text-gray-400'}`}>{entry.dueDays}D</div>
+      <div className="w-20 text-right text-[10px] font-bold text-blue-600 whitespace-nowrap hidden md:block">{entry.dueDate || '-'}</div>
     </div>
   );
 };
@@ -937,21 +931,28 @@ const AppContent: React.FC = () => {
 
   // Hard Reset Handler
   async function handleHardReset() {
-    if (window.confirm("This will clear all local cache and reload the app from the server. Continue?")) {
-      try {
-        // Clear LocalStorage
-        localStorage.clear();
-        // Clear IndexedDB
-        const yearsToClear = [...Object.keys(YEAR_GIDS), 'ALL_TIME'];
-        for (const y of yearsToClear) {
-          await set(`cachedLedgerData_${y}`, null);
-        }
-        // Force Reload
-        window.location.reload();
-      } catch (e) {
-        console.error("Reset failed", e);
-        alert("Reset failed. Please clear your browser data manually.");
+    try {
+      setLoading(true);
+      // Clear LocalStorage
+      localStorage.clear();
+      // Clear IndexedDB
+      const yearsToClear = [...Object.keys(YEAR_GIDS), 'ALL_TIME'];
+      for (const y of yearsToClear) {
+        await set(`cachedLedgerData_${y}`, null);
       }
+      // Unregister Service Workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+        }
+      }
+      // Force Reload
+      window.location.reload();
+    } catch (e) {
+      console.error("Reset failed", e);
+      alert("Reset failed. Please clear your browser data manually.");
+      setLoading(false);
     }
   }
 
@@ -1247,16 +1248,23 @@ const AppContent: React.FC = () => {
           </div>
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => loadData(selectedYear, true)}
+              onClick={() => {
+                alert("Note: Google Sheets updates can take 5-15 minutes to reflect here due to Google's caching.\n\nRunning force sync now...");
+                loadData(selectedYear, true);
+              }}
               disabled={loading}
               className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 p-2 rounded-lg shadow-sm transition-all active:scale-90 disabled:opacity-50 flex items-center gap-2"
-              title="Force Sync from Google Sheet"
+              title="Force Sync (Expect 15min delay from Google)"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin text-primary-600' : ''} />
               <span className="text-[10px] font-bold uppercase hidden sm:inline">Sync</span>
             </button>
             <button
-              onClick={handleHardReset}
+              onClick={() => {
+                if (window.confirm("Hard Reset: This will clear all local data, unregister service workers, and reload.\n\nUse this if the app feels 'stuck'.")) {
+                  handleHardReset();
+                }
+              }}
               className="bg-red-600 text-white hover:bg-red-700 p-2 rounded-lg shadow-md shadow-red-100 transition-all active:scale-90 flex items-center gap-2"
               title="Clear all cache and reload"
             >
@@ -1400,7 +1408,7 @@ const AppContent: React.FC = () => {
       <main className="flex-1 overflow-hidden relative flex flex-col">
         {activeTab === 'dashboard' ? (
           <>
-            <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar pb-2">
+            <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar pb-4 pt-2">
               <div className="flex-shrink-0 w-44 bg-white p-3 rounded-xl border-l-4 border-slate-500 shadow-sm flex flex-col justify-center">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-0.5">Total Bill</p>
                 <p className="text-base font-black text-slate-900 tabular-nums">
@@ -1424,32 +1432,27 @@ const AppContent: React.FC = () => {
             <div className={`flex-1 min-h-0 bg-slate-50 relative overflow-hidden flex flex-col ${viewMode === 'table' ? 'rounded-b-2xl border-x border-b border-gray-100' : ''}`}>
               {viewMode === 'table' && <TableViewHeader />}
               <div className="flex-1">
-                {/* @ts-ignore */}
-                <AutoSizer
-                  renderProp={({ height, width }: { height: number | undefined; width: number | undefined }) => {
-                    if (!height || !width) return null;
-                    return (
-                      /* @ts-ignore */
-                      <List
-                        key={viewMode}
-                        style={{ height, width }}
-                        rowCount={filteredData.length}
-                        rowHeight={viewMode === 'table' ? 45 : 125}
-                        rowComponent={viewMode === 'table' ? TableRow : Row}
-                        rowProps={{
-                          entries: filteredData,
-                          onUpdateStatus: handleUpdateStatus,
-                          updatingInvoice,
-                          onPartyClick: (party: string) => {
-                            setSelectedParty(party);
-                            setActiveTab('ledger');
-                          }
-                        }}
-                        className="scrollbar-thin scrollbar-thumb-gray-200"
-                      />
-                    );
-                  }}
-                />
+                <AutoSizer renderProp={({ height, width }) => (
+                  /* @ts-ignore */
+                  <List
+                    key={viewMode}
+                    className="scrollbar-thin scrollbar-thumb-gray-200"
+                    style={{ height: height ?? 0, width: width ?? 0 }}
+                    overscanCount={5}
+                    rowCount={filteredData.length}
+                    rowHeight={viewMode === 'table' ? 45 : 125}
+                    rowComponent={viewMode === 'table' ? TableRow : Row}
+                    rowProps={{
+                      entries: filteredData,
+                      onUpdateStatus: handleUpdateStatus,
+                      updatingInvoice,
+                      onPartyClick: (party: string) => {
+                        setSelectedParty(party);
+                        setActiveTab('ledger');
+                      }
+                    }}
+                  />
+                )} />
               </div>
             </div>
 
@@ -1588,10 +1591,13 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+import { SpeedInsights } from "@vercel/speed-insights/react"
+
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <AppContent />
+      <SpeedInsights />
     </ErrorBoundary>
   );
 };

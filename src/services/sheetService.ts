@@ -221,12 +221,15 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
     const url = `${SHEET_BASE_URL}&gid=${gid}&_t=${Date.now()}`;
 
     try {
-        return await new Promise((resolve, reject) => {
-            Papa.parse(url, {
-                download: true, header: true, skipEmptyLines: true, worker: false, // Worker false for better error handling in some cases
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Google Sheet fetch failed: ${response.status} ${response.statusText}`);
+        const csvText = await response.text();
+
+        return new Promise((resolve, reject) => {
+            Papa.parse(csvText, {
+                header: true, skipEmptyLines: true, worker: false,
                 complete: (results) => {
                     const data = results.data as Record<string, string | number>[];
-                    // Check for Google Sheet Errors
                     if (!data || data.length === 0 || (data.length > 0 && Object.values(data[0]).some(v => String(v).includes('#ERROR')))) {
                         reject(new Error("Google Sheet returned #ERROR! or empty data"));
                         return;
@@ -255,7 +258,7 @@ export async function fetchLedgerData(year: FinancialYear = '25-26', ignoreCache
                     const now = new Date();
                     resolve(data.map((row, i) => processRow(row, fieldMap, i, now)));
                 },
-                error: (error) => reject(error),
+                error: (error: any) => reject(error),
             });
         });
     } catch (gsError) {
