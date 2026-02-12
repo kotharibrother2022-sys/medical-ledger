@@ -20,7 +20,7 @@ export interface LedgerEntry {
     overdueDays?: number; // Days past due date (if available)
 }
 
-export const CACHE_VERSION = 'v19'; // Bumped for new dashboard summary metrics
+export const CACHE_VERSION = 'v20'; // Bumped for new data sync after excel update
 
 export const YEAR_GIDS = {
     '25-26': '1390916342', // Current
